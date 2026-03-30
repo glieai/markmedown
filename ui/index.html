@@ -47,17 +47,15 @@
     </div>
 
     <div class="tree-controls" id="tree-controls">
-      <button id="collapse-all" class="tree-control-btn" title="Collapse all">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 6l4 4 4-4"/>
+      <button id="collapse-all" class="tree-control-btn" title="Collapse all folders">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M7.976 10.072l4.357-4.357.62.618L7.975 11.3 3 6.333l.619-.618z"/>
         </svg>
-        Collapse
       </button>
-      <button id="expand-all" class="tree-control-btn" title="Expand all">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 10l4-4 4 4"/>
+      <button id="expand-all" class="tree-control-btn" title="Expand all folders">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M7.976 5.928L3.62 10.285 3 9.667 7.976 4.7l4.976 4.967-.62.618z"/>
         </svg>
-        Expand
       </button>
     </div>
 
@@ -80,9 +78,6 @@
       <div class="file-header-left">
         <span id="file-path" class="file-path"></span>
         <span id="git-badge" class="git-badge" hidden>
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M15.698 7.287L8.712.302a1.03 1.03 0 00-1.457 0L5.632 1.924l1.839 1.839a1.224 1.224 0 011.55 1.56l1.773 1.773a1.224 1.224 0 11-.733.693L8.378 6.106v4.444a1.224 1.224 0 11-1.008-.036V6.022a1.224 1.224 0 01-.664-1.607L4.88 2.589.302 7.168a1.03 1.03 0 000 1.457l6.986 6.986a1.03 1.03 0 001.457 0l6.953-6.953a1.03 1.03 0 000-1.457z"/>
-          </svg>
           <span id="git-repo-name"></span>
         </span>
       </div>

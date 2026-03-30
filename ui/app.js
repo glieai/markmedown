@@ -101,7 +101,7 @@ function createFileButton(file) {
 
   let html = `<span class="tree-file-icon">📄</span><span class="tree-file-name">${escapeHtml(file.name)}</span>`;
   if (file.gitRoot) {
-    html += `<span class="tree-file-git" title="Git: ${escapeHtml(file.gitRoot)}">⬡</span>`;
+    html += `<span class="tree-file-git" title="Git: ${escapeHtml(file.gitRoot)}">git</span>`;
   }
   btn.innerHTML = html;
 
@@ -233,7 +233,7 @@ function showSearchResults(results, query, indexReady) {
       <div class="search-result-name">
         <span class="tree-file-icon">📄</span>
         ${escapeHtml(result.name)}
-        ${result.gitRoot ? `<span class="tree-file-git">⬡</span>` : ''}
+        ${result.gitRoot ? `<span class="tree-file-git">git</span>` : ''}
       </div>
       <div class="search-result-path">${escapeHtml(pathDisplay)}</div>
       ${snippet ? `<div class="search-result-snippet">${snippet}</div>` : ''}
@@ -358,6 +358,7 @@ let milkdownLoaded = false;
 
 // The listener callback stores the latest markdown here on every change.
 let latestMarkdown = '';
+let suppressNextChange = false; // Prevent false "unsaved" on file open
 
 const MILKDOWN_VERSION = '7.20.0';
 
@@ -398,6 +399,10 @@ async function buildEditor(markdown) {
       ctx.get(listenerCtx).markdownUpdated((_ctx, md, prevMd) => {
         latestMarkdown = md;
         if (prevMd !== null && md !== prevMd) {
+          if (suppressNextChange) {
+            suppressNextChange = false;
+            return;
+          }
           scheduleAutoSave();
         }
       });
@@ -439,6 +444,9 @@ function setEditorContent(markdown) {
 
   milkdownEl.hidden = false;
   rawEditor.hidden = true;
+
+  // Suppress the first markdownUpdated from buildEditor (it's not a user edit)
+  suppressNextChange = true;
 
   // Rebuild WYSIWYG with new content
   buildEditor(markdown).catch((err) => {
@@ -616,9 +624,26 @@ async function refreshTree() {
     const data = await api('GET', '/api/tree');
     renderTree(data.tree);
     updateStatus(data.totalFiles, data.scanComplete);
+    return data;
   } catch (err) {
     console.error('[markmedown] failed to refresh tree:', err);
+    return null;
   }
+}
+
+// Poll for status until scan is complete (WebSocket may fail on large frames)
+function startStatusPoll() {
+  const poll = setInterval(async () => {
+    try {
+      const data = await api('GET', '/api/tree');
+      updateStatus(data.totalFiles, data.scanComplete);
+      if (data.scanComplete) {
+        clearInterval(poll);
+        renderTree(data.tree);
+        if (state.currentFile) updateActiveFile(state.currentFile.path);
+      }
+    } catch {}
+  }, 3000);
 }
 
 // --- Toolbar Commands ---
@@ -698,10 +723,15 @@ function formatSize(bytes) {
 // --- Init ---
 
 async function init() {
-  await refreshTree();
+  const data = await refreshTree();
   checkVscode();
   connectWebSocket();
   await initMilkdown();
+
+  // Poll until scan is complete (WebSocket may not deliver large frames)
+  if (!data?.scanComplete) {
+    startStatusPoll();
+  }
 }
 
 init();
