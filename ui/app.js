@@ -879,6 +879,63 @@ function formatSize(bytes) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+// --- Scroll to Top ---
+
+const scrollTopBtn = $('#scroll-top');
+
+function setupScrollToTop() {
+  // The scrollable container is milkdownEl or rawEditor's parent
+  const watchScroll = () => {
+    const container = state.isRawMode ? rawEditor : milkdownEl;
+    const show = container.scrollTop > 300;
+    scrollTopBtn.classList.toggle('visible', show);
+  };
+
+  milkdownEl.addEventListener('scroll', watchScroll);
+  rawEditor.addEventListener('scroll', watchScroll);
+
+  scrollTopBtn.addEventListener('click', () => {
+    const container = state.isRawMode ? rawEditor : milkdownEl;
+    container.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+
+// --- Anchor Links ---
+
+function setupAnchorLinks() {
+  // Handle clicks on anchor links inside the editor (Table of Contents, etc.)
+  milkdownEl.addEventListener('click', (e) => {
+    const link = e.target.closest('a');
+    if (!link) return;
+
+    const href = link.getAttribute('href');
+    if (!href) return;
+
+    // Anchor link (#section) — scroll to heading
+    if (href.startsWith('#')) {
+      e.preventDefault();
+      const target = href.slice(1).toLowerCase();
+      // Find heading that matches the anchor
+      const headings = milkdownEl.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      for (const h of headings) {
+        const id = h.textContent.trim().toLowerCase()
+          .replace(/[^\w\s-]/g, '')
+          .replace(/\s+/g, '-');
+        if (id === target || h.id === target) {
+          h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      }
+    }
+
+    // External link — open in new tab
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      e.preventDefault();
+      window.open(href, '_blank', 'noopener');
+    }
+  });
+}
+
 // --- Init ---
 
 async function init() {
@@ -890,6 +947,9 @@ async function init() {
   if (!data?.scanComplete) {
     startStatusPoll();
   }
+
+  setupScrollToTop();
+  setupAnchorLinks();
 
   // Restore file from URL hash
   const hash = decodeURIComponent(location.hash.slice(1));

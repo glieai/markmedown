@@ -661,11 +661,13 @@ body.raw-mode #raw-toggle {
 }
 
 .milkdown-editor .editor a {
-  color: var(--accent);
+  color: #7B8AF2;
   text-decoration: none;
+  cursor: pointer;
 }
 .milkdown-editor .editor a:hover {
   text-decoration: underline;
+  color: #9BA6FF;
 }
 
 .milkdown-editor .editor strong {
@@ -855,6 +857,39 @@ body.raw-mode #raw-toggle {
 }
 .btn-secondary:hover {
   background: var(--bg-active);
+}
+
+/* ================================================
+   Scroll to Top Button
+   ================================================ */
+
+.scroll-top-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 36px;
+  height: 36px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, background 150ms ease, color 150ms ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+}
+.scroll-top-btn.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.scroll-top-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* ================================================
