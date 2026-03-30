@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>markmedown</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <h1 class="logo">
+        <span class="logo-icon">◈</span>
+        markmedown
+      </h1>
+      <button id="new-file-btn" class="icon-btn" title="New file">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M8 3v10M3 8h10"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="search-container">
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="7" cy="7" r="4.5"/>
+        <path d="M10.5 10.5L14 14"/>
+      </svg>
+      <input type="text" id="search-input" placeholder="Search files..." autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="sidebar-stats" id="sidebar-stats">
+      <span id="file-count">0 files</span>
+      <span id="scan-status" class="scanning">scanning...</span>
+    </div>
+
+    <nav id="file-tree" class="file-tree">
+      <!-- Tree rendered by app.js -->
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <main id="main">
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state">
+      <div class="empty-icon">◈</div>
+      <h2>markmedown</h2>
+      <p>Select a file from the sidebar to start reading or editing.</p>
+    </div>
+
+    <!-- File header (shown when file is open) -->
+    <div id="file-header" class="file-header" hidden>
+      <div class="file-header-left">
+        <span id="file-path" class="file-path"></span>
+        <span id="git-badge" class="git-badge" hidden>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M15.698 7.287L8.712.302a1.03 1.03 0 00-1.457 0L5.632 1.924l1.839 1.839a1.224 1.224 0 011.55 1.56l1.773 1.773a1.224 1.224 0 11-.733.693L8.378 6.106v4.444a1.224 1.224 0 11-1.008-.036V6.022a1.224 1.224 0 01-.664-1.607L4.88 2.589.302 7.168a1.03 1.03 0 000 1.457l6.986 6.986a1.03 1.03 0 001.457 0l6.953-6.953a1.03 1.03 0 000-1.457z"/>
+          </svg>
+          <span id="git-repo-name"></span>
+        </span>
+      </div>
+      <div class="file-header-right">
+        <span id="save-indicator" class="save-indicator" hidden>
+          <span class="save-dot"></span> unsaved
+        </span>
+        <span id="file-size" class="file-meta"></span>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div id="toolbar" class="toolbar" hidden>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" data-command="toggleBold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button class="toolbar-btn" data-command="toggleItalic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button class="toolbar-btn" data-command="toggleStrikethrough" title="Strikethrough"><s>S</s></button>
+        <button class="toolbar-btn" data-command="toggleInlineCode" title="Inline code">
+          <code>&lt;/&gt;</code>
+        </button>
+      </div>
+      <div class="toolbar-separator"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" data-command="heading1" title="Heading 1">H1</button>
+        <button class="toolbar-btn" data-command="heading2" title="Heading 2">H2</button>
+        <button class="toolbar-btn" data-command="heading3" title="Heading 3">H3</button>
+      </div>
+      <div class="toolbar-separator"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" data-command="bulletList" title="Bullet list">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="2" cy="4" r="1.5"/><rect x="5" y="3" width="10" height="2" rx="0.5"/>
+            <circle cx="2" cy="8" r="1.5"/><rect x="5" y="7" width="10" height="2" rx="0.5"/>
+            <circle cx="2" cy="12" r="1.5"/><rect x="5" y="11" width="10" height="2" rx="0.5"/>
+          </svg>
+        </button>
+        <button class="toolbar-btn" data-command="orderedList" title="Numbered list">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <text x="0" y="5" font-size="5" font-family="sans-serif">1.</text><rect x="5" y="3" width="10" height="2" rx="0.5"/>
+            <text x="0" y="9" font-size="5" font-family="sans-serif">2.</text><rect x="5" y="7" width="10" height="2" rx="0.5"/>
+            <text x="0" y="13" font-size="5" font-family="sans-serif">3.</text><rect x="5" y="11" width="10" height="2" rx="0.5"/>
+          </svg>
+        </button>
+        <button class="toolbar-btn" data-command="taskList" title="Checkbox list">☑</button>
+      </div>
+      <div class="toolbar-separator"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" data-command="blockquote" title="Blockquote">❝</button>
+        <button class="toolbar-btn" data-command="codeBlock" title="Code block">{ }</button>
+        <button class="toolbar-btn" data-command="hr" title="Horizontal rule">—</button>
+        <button class="toolbar-btn" data-command="insertTable" title="Table">▦</button>
+      </div>
+      <div class="toolbar-separator"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" data-command="insertLink" title="Link">🔗</button>
+        <button class="toolbar-btn" data-command="insertImage" title="Image">🖼</button>
+      </div>
+
+      <div class="toolbar-spacer"></div>
+
+      <div class="toolbar-group">
+        <button id="raw-toggle" class="toolbar-btn toolbar-btn-toggle" title="Toggle raw markdown">
+          <span class="toggle-label-raw">Raw</span>
+          <span class="toggle-label-wysiwyg">WYSIWYG</span>
+        </button>
+        <button id="vscode-btn" class="toolbar-btn" title="Open in VS Code" hidden>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M14.5 0L6 7.5 2.5 4.5 0 6.5l6 5.5 10-10z"/>
+          </svg>
+          VS Code
+        </button>
+      </div>
+    </div>
+
+    <!-- Editor area -->
+    <div id="editor-container" class="editor-container" hidden>
+      <div id="milkdown-editor" class="milkdown-editor"></div>
+      <textarea id="raw-editor" class="raw-editor" hidden spellcheck="false"></textarea>
+    </div>
+
+    <!-- Large file warning -->
+    <div id="large-file-warning" class="large-file-warning" hidden>
+      <p>⚠ This file is large (<span id="large-file-size"></span>). Editing in raw mode for better performance.</p>
+    </div>
+  </main>
+
+  <!-- New file modal -->
+  <dialog id="new-file-dialog" class="modal">
+    <form method="dialog">
+      <h3>Create New File</h3>
+      <label for="new-file-path">File path (relative to ~/):</label>
+      <input type="text" id="new-file-path" placeholder="notes/my-note.md" autocomplete="off" spellcheck="false">
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="new-file-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="new-file-create">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

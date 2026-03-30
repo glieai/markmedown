@@ -1,0 +1,25 @@
+{
+  "name": "markmedown",
+  "version": "0.1.0",
+  "description": "Browse and edit all your markdown files in a beautiful browser UI",
+  "type": "module",
+  "bin": {
+    "markmedown": "./bin/markmedown.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "ui/"
+  ],
+  "keywords": [
+    "markdown",
+    "knowledge-base",
+    "editor",
+    "browser",
+    "cli"
+  ],
+  "license": "MIT"
+}

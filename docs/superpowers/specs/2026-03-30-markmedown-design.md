@@ -6,13 +6,44 @@ Markdown files are everywhere — project docs, personal notes, agent instructio
 
 ## What It Does
 
-```
-$ markmedown                    # scan ~/, start server, open browser
+```bash
+$ markmedown                    # smart: if daemon not running → start + open browser
+                                #        if daemon running → just open browser
+
+$ markmedown start              # start daemon in background (no browser)
+$ markmedown stop               # stop the daemon
+$ markmedown status             # show if running, port, indexed file count
 $ markmedown --port 4000        # custom port
-$ markmedown --no-open          # don't auto-open browser
+$ markmedown install            # auto-start on boot (systemd/launchd)
+$ markmedown uninstall          # remove auto-start
 ```
 
-One command. No config files. No init step. Scans `~/` for all `.md` files (skipping noise like `node_modules`, `.git`, `.cache`), starts a local server, opens the browser.
+Zero config. First run scans `~/` for all `.md` files (skipping noise like `node_modules`, `.git`, `.cache`), starts a daemon, opens the browser. From then on, it's always running — just type `markmedown` to open the browser.
+
+### Daemon Lifecycle
+
+1. `markmedown` (or `markmedown start`) → forks a background Node.js process
+2. Parent exits immediately — terminal is free
+3. Daemon stores PID in `~/.markmedown/pid`, port in `~/.markmedown/port`
+4. Logs written to `~/.markmedown/markmedown.log`
+5. `markmedown stop` → reads PID, sends `SIGTERM`, cleans up pid/port files
+6. `markmedown` when already running → reads port file, opens browser, exits
+7. `markmedown status` → reads pid/port, checks if process alive, prints stats
+
+### Auto-start on Boot (optional)
+
+`markmedown install` generates and installs:
+- **Linux**: a `~/.config/systemd/user/markmedown.service` unit (user-level, no root needed)
+- **macOS**: a `~/Library/LaunchAgents/com.markmedown.plist`
+
+`markmedown uninstall` removes the service file. The generated file is human-readable and editable.
+
+### Resource Usage (daemon idle)
+
+- **CPU**: ~0%. Node.js event loop sleeps. Only wakes on `fs.watch` events or HTTP requests.
+- **RAM**: ~30-50MB (Node.js base + in-memory Map). ~1MB per 10,000 indexed files.
+- **Disk**: `~/.markmedown/cache.json` (small) + log file.
+- **Network**: `127.0.0.1` only, no external connections.
 
 ## Architecture
 
@@ -21,7 +52,7 @@ One command. No config files. No init step. Scans `~/` for all `.md` files (skip
 │  Node.js Process (single)                    │
 │                                              │
 │  Scanner ──→ In-memory Map ──→ HTTP Server   │
-│  (async        of .md files     :3377        │
+│  (async        of .md files     :44444        │
 │   generator)                                 │
 │                                              │
 │  Watcher ──→ diffs pushed via WebSocket      │
@@ -57,12 +88,24 @@ One command. No config files. No init step. Scans `~/` for all `.md` files (skip
 
 ### 1. CLI Entry (`bin/markmedown.js`)
 
-- Parse `process.argv` for `--port`, `--no-open` (no arg-parsing library)
-- Start scanner (non-blocking, async)
-- Start HTTP server on port 3377 (or `--port` value, or next available)
-- Open browser via `xdg-open` (Linux) / `open` (macOS)
-- Print: `markmedown running at http://localhost:3377`
-- Handle SIGINT for clean shutdown
+Parses `process.argv` for subcommands and flags (no arg-parsing library).
+
+**Commands:**
+- `markmedown` (no args) → if daemon running (check `~/.markmedown/pid`), open browser and exit. Otherwise, start daemon + open browser.
+- `markmedown start` → fork daemon process, write PID/port to `~/.markmedown/`, exit parent.
+- `markmedown stop` → read PID from `~/.markmedown/pid`, send `SIGTERM`, clean up.
+- `markmedown status` → check if PID is alive, read port, print stats (files indexed, uptime).
+- `markmedown install` → generate and install systemd service (Linux) or launchd plist (macOS).
+- `markmedown uninstall` → remove the service file.
+
+**Flags:** `--port <n>` (custom port, default 44444).
+
+**Daemon fork:**
+- Uses `child_process.fork` with `detached: true` and `stdio: 'ignore'`
+- Parent `unref()`s the child and exits
+- Child writes its PID and port to `~/.markmedown/pid` and `~/.markmedown/port`
+- Child redirects stdout/stderr to `~/.markmedown/markmedown.log`
+- Child handles SIGTERM for clean shutdown (close server, stop watcher)
 
 ### 2. Scanner (`src/scanner.js`)
 
@@ -77,7 +120,8 @@ node_modules, .git, .svn, .hg, .cache, .npm, .nvm, .local,
 
 **Behavior:**
 - Skips ignored directories at `opendir` level (never descends)
-- Yields `{ absolutePath, relativePath, mtime, size }` for each `.md` file
+- Yields `{ absolutePath, relativePath, mtime, size, gitRoot }` for each `.md` file
+- `gitRoot`: detected by walking up from the file looking for a `.git/` directory (cached per parent dir to avoid repeated lookups)
 - Stores results in an in-memory `Map<absolutePath, FileEntry>`
 - Builds a nested tree structure from the flat map for the sidebar
 
@@ -236,11 +280,29 @@ markmedown/
 | File deleted while open | WebSocket notifies frontend, show "file deleted" message |
 | Concurrent external edit | Watcher detects change, prompt user to reload |
 
+## v1 Foundation: Git Awareness
+
+The scanner detects whether each `.md` file lives inside a git repository and stores that context.
+
+**During scan:**
+- For each `.md` file found, check if it's inside a git repo (walk up looking for `.git/` directory)
+- Cache the git root path per file in the Map: `{ ...fileEntry, gitRoot: '/path/to/repo' | null }`
+- Group this in the tree UI — files inside git repos get a subtle git icon indicator
+
+**v1 scope (foundation only):**
+- Detect and store `gitRoot` for each file during scan
+- Show a git badge/icon next to files that are in a git repo
+- Show the repo name (folder name of git root) in the file info area
+- In the file tree, optionally group/indicate which files belong to the same repo
+
+**Why this matters for v2:** The git root detection is the expensive part. Once we know a file's git root, all future git operations (log, blame, diff, status) are cheap `child_process.exec` calls scoped to that repo.
+
 ## v2 — Coming Soon (Design hooks, not implementation)
 
 These features are NOT built in v1 but the architecture supports them:
 
-- **Dashboard**: `/api/stats` endpoint using cached mtime/size data. Total files, recently modified, largest files, folder distribution.
+- **Git integration (full)**: For files in git repos, show last commit info (author, date, message), file history (`git log --follow`), diff view for uncommitted changes, git status badge (modified/staged/untracked). API: `GET /api/git/info?path=...` runs `git log -1` scoped to the file's `gitRoot`. `GET /api/git/history?path=...` returns commit history. `GET /api/git/diff?path=...` shows uncommitted changes.
+- **Dashboard**: `/api/stats` endpoint using cached mtime/size data. Total files, recently modified, largest files, folder distribution. Git stats: repos with most docs, recently committed docs.
 - **Claude CLI integration**: Select text in editor → context menu "Ask Claude" → spawns `claude` child process with selected text → streams response back via WebSocket → inserts below selection.
 - **Slash commands**: Milkdown plugin for `/claude` in-editor trigger.
 - **Tags/backlinks**: Parse `#tags` and `[[wiki-links]]` from file content during scan.
@@ -250,7 +312,7 @@ These features are NOT built in v1 but the architecture supports them:
 
 1. **Install**: `npm install -g .` from project root → `markmedown` command available
 2. **Scan**: Run `markmedown`, verify console shows scan progress and file count
-3. **Browser**: Verify browser opens automatically to `http://localhost:3377`
+3. **Browser**: Verify browser opens automatically to `http://localhost:44444`
 4. **File tree**: Verify sidebar shows folders and `.md` files from `~/`
 5. **Search**: Type in search box, verify tree filters correctly
 6. **View**: Click a file, verify markdown renders in WYSIWYG mode
