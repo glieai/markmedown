@@ -858,6 +858,41 @@ body.raw-mode #raw-toggle {
 }
 
 /* ================================================
+   Floating Selection Toolbar
+   ================================================ */
+
+.floating-toolbar {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.ft-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  transition: background var(--transition), color var(--transition);
+}
+.ft-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.ft-bold { font-weight: 700; }
+.ft-italic { font-style: italic; }
+.ft-strike { text-decoration: line-through; }
+
+/* ================================================
    Responsive
    ================================================ */
 

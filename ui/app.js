@@ -84,9 +84,18 @@ function renderNode(node, parent, depth) {
       e.preventDefault();
       e.stopPropagation();
       const children = details.querySelectorAll('.tree-folder');
-      const allOpen = [...children].every((d) => d.open);
-      children.forEach((d) => d.open = !allOpen);
-      details.open = true; // keep this folder itself open
+      const allOpen = children.length > 0
+        ? [...children].every((d) => d.open)
+        : details.open;
+      if (allOpen) {
+        // Collapse everything including self
+        children.forEach((d) => d.open = false);
+        details.open = false;
+      } else {
+        // Expand everything
+        details.open = true;
+        children.forEach((d) => d.open = true);
+      }
     });
     summary.appendChild(toggle);
     details.appendChild(summary);
@@ -384,8 +393,9 @@ let milkdownLoaded = false;
 let latestMarkdown = '';
 let suppressNextChange = false;
 
-// Store command references for toolbar
+// Store command references and ctx for toolbar
 let milkdownCommands = null;
+let commandsCtxRef = null;
 
 const MILKDOWN_VERSION = '7.20.0';
 
@@ -405,7 +415,7 @@ async function loadMilkdownModules() {
 
 async function buildEditor(markdown) {
   const { core, commonmarkMod, gfmMod, listenerMod } = await loadMilkdownModules();
-  const { Editor, rootCtx, defaultValueCtx, commandsCtx } = core;
+  const { Editor, rootCtx, defaultValueCtx, commandsCtx, editorViewCtx } = core;
   const { commonmark } = commonmarkMod;
   const { gfm } = gfmMod;
   const { listener, listenerCtx } = listenerMod;
@@ -417,6 +427,7 @@ async function buildEditor(markdown) {
   milkdownEl.innerHTML = '';
 
   latestMarkdown = markdown;
+  commandsCtxRef = commandsCtx;
 
   const editor = await Editor.make()
     .config((ctx) => {
@@ -440,24 +451,26 @@ async function buildEditor(markdown) {
 
   milkdownEditor = editor;
 
-  // Store command references for toolbar use
+  // Store command references — using CORRECT export names from Milkdown 7.20
   milkdownCommands = {
-    commandsCtx,
-    // Commonmark commands
-    toggleBold: commonmarkMod.toggleBoldCommand,
-    toggleItalic: commonmarkMod.toggleItalicCommand,
+    // Commonmark (bold = toggleStrongCommand, italic = toggleEmphasisCommand)
+    toggleBold: commonmarkMod.toggleStrongCommand,
+    toggleItalic: commonmarkMod.toggleEmphasisCommand,
     toggleInlineCode: commonmarkMod.toggleInlineCodeCommand,
+    toggleLink: commonmarkMod.toggleLinkCommand,
     wrapInHeading: commonmarkMod.wrapInHeadingCommand,
     wrapInBulletList: commonmarkMod.wrapInBulletListCommand,
     wrapInOrderedList: commonmarkMod.wrapInOrderedListCommand,
     wrapInBlockquote: commonmarkMod.wrapInBlockquoteCommand,
     insertHr: commonmarkMod.insertHrCommand,
     createCodeBlock: commonmarkMod.createCodeBlockCommand,
-    insertImage: commonmarkMod.insertImageCommand,
-    // GFM commands
+    // GFM
     toggleStrikethrough: gfmMod.toggleStrikethroughCommand,
     insertTable: gfmMod.insertTableCommand,
   };
+
+  // Set up floating selection toolbar
+  setupSelectionToolbar(editor, editorViewCtx);
 
   return editor;
 }
@@ -503,21 +516,87 @@ function getEditorContent() {
 
 // --- Milkdown Toolbar Commands ---
 
-function executeMilkdownCommand(command, param) {
-  if (!milkdownEditor || !milkdownCommands) return;
-
+function runCmd(cmdRef, param) {
+  if (!milkdownEditor || !cmdRef || !commandsCtxRef) return;
   try {
     milkdownEditor.action((ctx) => {
-      const cmds = ctx.get(milkdownCommands.commandsCtx);
+      const cmds = ctx.get(commandsCtxRef);
       if (param !== undefined) {
-        cmds.call(command.key, param);
+        cmds.call(cmdRef.key, param);
       } else {
-        cmds.call(command.key);
+        cmds.call(cmdRef.key);
       }
     });
   } catch (err) {
     console.warn('[markmedown] command failed:', err.message);
   }
+}
+
+// --- Floating Selection Toolbar ---
+
+let floatingToolbar = null;
+
+function createFloatingToolbar() {
+  const bar = document.createElement('div');
+  bar.className = 'floating-toolbar';
+  bar.hidden = true;
+
+  const buttons = [
+    { label: 'B', title: 'Bold', cmd: 'toggleBold', cls: 'ft-bold' },
+    { label: 'I', title: 'Italic', cmd: 'toggleItalic', cls: 'ft-italic' },
+    { label: 'S', title: 'Strikethrough', cmd: 'toggleStrikethrough', cls: 'ft-strike' },
+    { label: '< >', title: 'Code', cmd: 'toggleInlineCode', cls: '' },
+    { label: 'Link', title: 'Link', cmd: 'toggleLink', cls: '' },
+  ];
+
+  for (const { label, title, cmd, cls } of buttons) {
+    const btn = document.createElement('button');
+    btn.className = `ft-btn ${cls}`;
+    btn.title = title;
+    btn.textContent = label;
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // Prevent losing selection
+      runCmd(milkdownCommands?.[cmd]);
+    });
+    bar.appendChild(btn);
+  }
+
+  document.body.appendChild(bar);
+  return bar;
+}
+
+function setupSelectionToolbar(editor, editorViewCtx) {
+  if (!floatingToolbar) {
+    floatingToolbar = createFloatingToolbar();
+  }
+
+  // Listen for selection changes in the editor
+  document.addEventListener('selectionchange', () => {
+    if (state.isRawMode || !milkdownEditor) {
+      floatingToolbar.hidden = true;
+      return;
+    }
+
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      floatingToolbar.hidden = true;
+      return;
+    }
+
+    // Check if selection is inside our editor
+    const range = sel.getRangeAt(0);
+    const editorEl = milkdownEl.querySelector('.editor, .ProseMirror');
+    if (!editorEl || !editorEl.contains(range.commonAncestorContainer)) {
+      floatingToolbar.hidden = true;
+      return;
+    }
+
+    // Position toolbar above selection
+    const rect = range.getBoundingClientRect();
+    floatingToolbar.hidden = false;
+    floatingToolbar.style.top = `${rect.top + window.scrollY - 42}px`;
+    floatingToolbar.style.left = `${rect.left + (rect.width / 2) - (floatingToolbar.offsetWidth / 2)}px`;
+  });
 }
 
 // --- Raw Mode Toggle ---
@@ -707,34 +786,21 @@ function startStatusPoll() {
 // --- Toolbar Commands ---
 
 const COMMAND_MAP = {
-  toggleBold: () => executeMilkdownCommand(milkdownCommands?.toggleBold),
-  toggleItalic: () => executeMilkdownCommand(milkdownCommands?.toggleItalic),
-  toggleStrikethrough: () => executeMilkdownCommand(milkdownCommands?.toggleStrikethrough),
-  toggleInlineCode: () => executeMilkdownCommand(milkdownCommands?.toggleInlineCode),
-  heading1: () => executeMilkdownCommand(milkdownCommands?.wrapInHeading, 1),
-  heading2: () => executeMilkdownCommand(milkdownCommands?.wrapInHeading, 2),
-  heading3: () => executeMilkdownCommand(milkdownCommands?.wrapInHeading, 3),
-  bulletList: () => executeMilkdownCommand(milkdownCommands?.wrapInBulletList),
-  orderedList: () => executeMilkdownCommand(milkdownCommands?.wrapInOrderedList),
-  blockquote: () => executeMilkdownCommand(milkdownCommands?.wrapInBlockquote),
-  codeBlock: () => executeMilkdownCommand(milkdownCommands?.createCodeBlock),
-  hr: () => executeMilkdownCommand(milkdownCommands?.insertHr),
-  insertTable: () => executeMilkdownCommand(milkdownCommands?.insertTable),
-  insertLink: () => {
-    const url = prompt('URL:');
-    if (!url) return;
-    // Insert markdown link at cursor
-    milkdownEditor?.action((ctx) => {
-      const { editorViewCtx } = milkdownModules.core;
-      const view = ctx.get(editorViewCtx);
-      const { from, to } = view.state.selection;
-      const text = view.state.doc.textBetween(from, to) || 'link';
-      view.dispatch(view.state.tr.replaceWith(from, to,
-        view.state.schema.text(text, [view.state.schema.marks.link.create({ href: url })])
-      ));
-    });
-  },
-  insertImage: () => executeMilkdownCommand(milkdownCommands?.insertImage),
+  toggleBold: () => runCmd(milkdownCommands?.toggleBold),
+  toggleItalic: () => runCmd(milkdownCommands?.toggleItalic),
+  toggleStrikethrough: () => runCmd(milkdownCommands?.toggleStrikethrough),
+  toggleInlineCode: () => runCmd(milkdownCommands?.toggleInlineCode),
+  heading1: () => runCmd(milkdownCommands?.wrapInHeading, 1),
+  heading2: () => runCmd(milkdownCommands?.wrapInHeading, 2),
+  heading3: () => runCmd(milkdownCommands?.wrapInHeading, 3),
+  bulletList: () => runCmd(milkdownCommands?.wrapInBulletList),
+  orderedList: () => runCmd(milkdownCommands?.wrapInOrderedList),
+  blockquote: () => runCmd(milkdownCommands?.wrapInBlockquote),
+  codeBlock: () => runCmd(milkdownCommands?.createCodeBlock),
+  hr: () => runCmd(milkdownCommands?.insertHr),
+  insertTable: () => runCmd(milkdownCommands?.insertTable),
+  insertLink: () => runCmd(milkdownCommands?.toggleLink),
+  insertImage: () => {}, // TODO v2: image upload
 };
 
 toolbar.addEventListener('click', (e) => {
