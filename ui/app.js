@@ -317,6 +317,9 @@ async function openFile(path, fileInfo) {
 
     setEditorContent(data.content);
     updateActiveFile(path);
+
+    // Update URL so refresh preserves open file
+    history.replaceState(null, '', `#${encodeURIComponent(path)}`);
   } catch (err) {
     console.error('Failed to open file:', err);
   }
@@ -886,6 +889,12 @@ async function init() {
 
   if (!data?.scanComplete) {
     startStatusPoll();
+  }
+
+  // Restore file from URL hash
+  const hash = decodeURIComponent(location.hash.slice(1));
+  if (hash) {
+    openFile(hash, null);
   }
 }
 
