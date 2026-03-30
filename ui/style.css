@@ -661,13 +661,15 @@ body.raw-mode #raw-toggle {
 }
 
 .milkdown-editor .editor a {
-  color: #7B8AF2;
-  text-decoration: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
   cursor: pointer;
+  transition: text-decoration-color var(--transition);
 }
 .milkdown-editor .editor a:hover {
-  text-decoration: underline;
-  color: #9BA6FF;
+  text-decoration-color: var(--text-secondary);
 }
 
 .milkdown-editor .editor strong {
