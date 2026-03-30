@@ -74,6 +74,21 @@ function renderNode(node, parent, depth) {
 
     const summary = document.createElement('summary');
     summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
+
+    // Per-folder recursive toggle (appears on hover)
+    const toggle = document.createElement('button');
+    toggle.className = 'folder-toggle';
+    toggle.title = 'Collapse/expand all inside';
+    toggle.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h8M4 10h8"/></svg>';
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const children = details.querySelectorAll('.tree-folder');
+      const allOpen = [...children].every((d) => d.open);
+      children.forEach((d) => d.open = !allOpen);
+      details.open = true; // keep this folder itself open
+    });
+    summary.appendChild(toggle);
     details.appendChild(summary);
 
     const content = document.createElement('div');

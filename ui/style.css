@@ -330,6 +330,28 @@ body {
   color: var(--text-primary);
 }
 
+.folder-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  margin-left: auto;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+  flex-shrink: 0;
+}
+.tree-folder > summary:hover .folder-toggle {
+  opacity: 1;
+}
+.folder-toggle:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
 .tree-folder-name {
   overflow: hidden;
   text-overflow: ellipsis;
