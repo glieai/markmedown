@@ -43,7 +43,7 @@
 
     <div class="sidebar-stats" id="sidebar-stats">
       <span id="file-count">0 files</span>
-      <span id="scan-status" class="scanning">scanning...</span>
+      <span id="scan-status" class="status-dot status-scanning" title="Scanning..."></span>
     </div>
 
     <div class="tree-controls" id="tree-controls">
@@ -126,8 +126,10 @@
 
       <div class="toolbar-group">
         <button id="raw-toggle" class="toolbar-btn toolbar-btn-toggle" title="Toggle raw markdown">
-          <span class="toggle-label-raw">Raw</span>
-          <span class="toggle-label-wysiwyg">WYSIWYG</span>
+          <!-- Show code icon: switches between WYSIWYG and raw -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+          </svg>
         </button>
         <button id="vscode-btn" class="toolbar-btn toolbar-btn-vscode" title="Open in VS Code" hidden>
           <!-- VS Code icon (official) -->

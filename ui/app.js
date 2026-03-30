@@ -67,11 +67,9 @@ function renderTree(tree) {
 }
 
 function renderNode(node, parent, depth) {
-  // Render subdirectories
   for (const child of node.children) {
     const details = document.createElement('details');
     details.className = 'tree-folder';
-    // Only expand first level by default
     if (depth === 0) details.open = true;
 
     const summary = document.createElement('summary');
@@ -86,7 +84,6 @@ function renderNode(node, parent, depth) {
     parent.appendChild(details);
   }
 
-  // Render files
   for (const file of node.files) {
     const btn = createFileButton(file);
     parent.appendChild(btn);
@@ -101,7 +98,7 @@ function createFileButton(file) {
 
   let html = `<span class="tree-file-icon">📄</span><span class="tree-file-name">${escapeHtml(file.name)}</span>`;
   if (file.gitRoot) {
-    html += `<span class="tree-file-git" title="Git: ${escapeHtml(file.gitRoot)}">git</span>`;
+    html += `<span class="tree-file-git" title="${escapeHtml(file.gitRoot)}">git</span>`;
   }
   btn.innerHTML = html;
 
@@ -131,7 +128,6 @@ let searchDebounce = null;
 
 searchInput.addEventListener('input', () => {
   const query = searchInput.value.trim();
-
   clearTimeout(searchDebounce);
 
   if (!query) {
@@ -139,21 +135,18 @@ searchInput.addEventListener('input', () => {
     return;
   }
 
-  // Short queries: filter tree locally (file/folder names)
   if (query.length < 3) {
     hideSearchResults();
     filterTreeLocal(query.toLowerCase());
     return;
   }
 
-  // 3+ chars: debounce and call the server search API (full-text)
   searchDebounce = setTimeout(() => runSearch(query), 200);
 });
 
 searchClear.addEventListener('click', () => {
   searchInput.value = '';
   hideSearchResults();
-  // Unhide all tree items
   fileTree.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
 });
 
@@ -168,24 +161,19 @@ function filterTreeLocal(query) {
     return;
   }
 
-  // Process files
   fileTree.querySelectorAll('.tree-file').forEach((btn) => {
     const name = btn.querySelector('.tree-file-name').textContent.toLowerCase();
     const path = (btn.dataset.path || '').toLowerCase();
-    const matches = name.includes(query) || path.includes(query);
-    btn.classList.toggle('tree-hidden', !matches);
+    btn.classList.toggle('tree-hidden', !name.includes(query) && !path.includes(query));
   });
 
-  // Process folders — hide if no visible children, also match folder name
   const folders = [...fileTree.querySelectorAll('.tree-folder')].reverse();
   for (const details of folders) {
     const folderName = details.querySelector('.tree-folder-name')?.textContent.toLowerCase() || '';
     const content = details.querySelector('.tree-content');
     const hasVisibleChild = content?.querySelector('.tree-file:not(.tree-hidden), .tree-folder:not(.tree-hidden)');
-    const folderMatches = folderName.includes(query);
 
-    if (folderMatches) {
-      // Show folder and all its contents
+    if (folderName.includes(query)) {
       details.classList.remove('tree-hidden');
       details.open = true;
       details.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
@@ -213,7 +201,6 @@ function showSearchResults(results, query, indexReady) {
 
   const indexLabel = indexReady ? '' : ' (indexing...)';
   searchResultsCount.textContent = `${results.length} results${indexLabel}`;
-
   searchResultsList.innerHTML = '';
 
   if (results.length === 0) {
@@ -224,16 +211,14 @@ function showSearchResults(results, query, indexReady) {
   for (const result of results) {
     const item = document.createElement('button');
     item.className = 'search-result-item';
-    item.dataset.path = result.path;
-
     const snippet = highlightSnippet(result.snippet, query);
-    const pathDisplay = result.relativePath.replace(/^/, '~/');
+    const pathDisplay = '~/' + result.relativePath;
 
     item.innerHTML = `
       <div class="search-result-name">
         <span class="tree-file-icon">📄</span>
         ${escapeHtml(result.name)}
-        ${result.gitRoot ? `<span class="tree-file-git">git</span>` : ''}
+        ${result.gitRoot ? '<span class="tree-file-git">git</span>' : ''}
       </div>
       <div class="search-result-path">${escapeHtml(pathDisplay)}</div>
       ${snippet ? `<div class="search-result-snippet">${snippet}</div>` : ''}
@@ -241,7 +226,6 @@ function showSearchResults(results, query, indexReady) {
 
     item.addEventListener('click', () => {
       openFile(result.path, result);
-      // Clear search after opening
       searchInput.value = '';
       hideSearchResults();
       fileTree.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
@@ -266,7 +250,6 @@ function escapeRegex(str) {
 // --- File Operations ---
 
 async function openFile(path, fileInfo) {
-  // Check for unsaved changes
   if (state.isDirty && state.currentFile) {
     await saveCurrentFile();
   }
@@ -281,7 +264,6 @@ async function openFile(path, fileInfo) {
     state.currentFile = { path, content: data.content, mtime: data.mtime, fileInfo };
     state.isDirty = false;
 
-    // Update UI — show editor area
     emptyState.hidden = true;
     fileHeader.hidden = false;
     toolbar.hidden = false;
@@ -292,7 +274,6 @@ async function openFile(path, fileInfo) {
     filePathEl.textContent = path.replace(/^\/home\/[^/]+\//, '~/');
     fileSizeEl.textContent = formatSize(data.size);
 
-    // Git badge
     if (fileInfo?.gitRoot) {
       gitBadge.hidden = false;
       gitRepoName.textContent = fileInfo.gitRoot.split('/').pop();
@@ -300,7 +281,6 @@ async function openFile(path, fileInfo) {
       gitBadge.hidden = true;
     }
 
-    // Large file handling
     const isLarge = data.size > 512000;
     const isVeryLarge = data.size > 2097152;
     if (isLarge) {
@@ -311,12 +291,45 @@ async function openFile(path, fileInfo) {
       setRawMode(true);
     }
 
-    // Set content in editor
     setEditorContent(data.content);
     updateActiveFile(path);
   } catch (err) {
     console.error('Failed to open file:', err);
   }
+}
+
+// Auto-refresh: reload current file when changed externally
+async function reloadCurrentFile() {
+  if (!state.currentFile) return;
+  if (state.isDirty) return; // Don't overwrite unsaved changes
+
+  try {
+    const data = await api('GET', `/api/file?path=${encodeURIComponent(state.currentFile.path)}`);
+    if (data.error) return;
+
+    // Only reload if mtime actually changed
+    if (data.mtime === state.currentFile.mtime) return;
+
+    state.currentFile.content = data.content;
+    state.currentFile.mtime = data.mtime;
+    fileSizeEl.textContent = formatSize(data.size);
+
+    // Preserve scroll position
+    const scrollTop = state.isRawMode
+      ? rawEditor.scrollTop
+      : milkdownEl.scrollTop;
+
+    setEditorContent(data.content);
+
+    // Restore scroll
+    requestAnimationFrame(() => {
+      if (state.isRawMode) {
+        rawEditor.scrollTop = scrollTop;
+      } else {
+        milkdownEl.scrollTop = scrollTop;
+      }
+    });
+  } catch {}
 }
 
 async function saveCurrentFile() {
@@ -339,10 +352,9 @@ async function saveCurrentFile() {
   }
 }
 
-// Debounced auto-save
 let saveTimer = null;
 function scheduleAutoSave() {
-  if (!state.currentFile) return; // Don't mark dirty without a file
+  if (!state.currentFile) return;
   state.isDirty = true;
   saveIndicator.hidden = false;
   clearTimeout(saveTimer);
@@ -351,14 +363,14 @@ function scheduleAutoSave() {
 
 // --- Editor ---
 
-// Milkdown modules — loaded once from CDN, reused across rebuilds
 let milkdownModules = null;
 let milkdownEditor = null;
 let milkdownLoaded = false;
-
-// The listener callback stores the latest markdown here on every change.
 let latestMarkdown = '';
-let suppressNextChange = false; // Prevent false "unsaved" on file open
+let suppressNextChange = false;
+
+// Store command references for toolbar
+let milkdownCommands = null;
 
 const MILKDOWN_VERSION = '7.20.0';
 
@@ -378,12 +390,11 @@ async function loadMilkdownModules() {
 
 async function buildEditor(markdown) {
   const { core, commonmarkMod, gfmMod, listenerMod } = await loadMilkdownModules();
-  const { Editor, rootCtx, defaultValueCtx } = core;
+  const { Editor, rootCtx, defaultValueCtx, commandsCtx } = core;
   const { commonmark } = commonmarkMod;
   const { gfm } = gfmMod;
   const { listener, listenerCtx } = listenerMod;
 
-  // Destroy existing editor
   if (milkdownEditor) {
     try { await milkdownEditor.destroy(); } catch {}
     milkdownEditor = null;
@@ -413,6 +424,26 @@ async function buildEditor(markdown) {
     .create();
 
   milkdownEditor = editor;
+
+  // Store command references for toolbar use
+  milkdownCommands = {
+    commandsCtx,
+    // Commonmark commands
+    toggleBold: commonmarkMod.toggleBoldCommand,
+    toggleItalic: commonmarkMod.toggleItalicCommand,
+    toggleInlineCode: commonmarkMod.toggleInlineCodeCommand,
+    wrapInHeading: commonmarkMod.wrapInHeadingCommand,
+    wrapInBulletList: commonmarkMod.wrapInBulletListCommand,
+    wrapInOrderedList: commonmarkMod.wrapInOrderedListCommand,
+    wrapInBlockquote: commonmarkMod.wrapInBlockquoteCommand,
+    insertHr: commonmarkMod.insertHrCommand,
+    createCodeBlock: commonmarkMod.createCodeBlockCommand,
+    insertImage: commonmarkMod.insertImageCommand,
+    // GFM commands
+    toggleStrikethrough: gfmMod.toggleStrikethroughCommand,
+    insertTable: gfmMod.insertTableCommand,
+  };
+
   return editor;
 }
 
@@ -431,12 +462,10 @@ async function initMilkdown() {
 }
 
 function setEditorContent(markdown) {
-  // Always update raw editor as backup
   rawEditor.value = markdown;
   latestMarkdown = markdown;
 
   if (state.isRawMode || !milkdownLoaded) {
-    // In raw mode, just show textarea
     milkdownEl.hidden = true;
     rawEditor.hidden = false;
     return;
@@ -444,11 +473,8 @@ function setEditorContent(markdown) {
 
   milkdownEl.hidden = false;
   rawEditor.hidden = true;
-
-  // Suppress the first markdownUpdated from buildEditor (it's not a user edit)
   suppressNextChange = true;
 
-  // Rebuild WYSIWYG with new content
   buildEditor(markdown).catch((err) => {
     console.error('[markmedown] failed to set editor content:', err);
     setRawMode(true);
@@ -456,10 +482,27 @@ function setEditorContent(markdown) {
 }
 
 function getEditorContent() {
-  if (state.isRawMode) {
-    return rawEditor.value;
-  }
+  if (state.isRawMode) return rawEditor.value;
   return latestMarkdown || rawEditor.value;
+}
+
+// --- Milkdown Toolbar Commands ---
+
+function executeMilkdownCommand(command, param) {
+  if (!milkdownEditor || !milkdownCommands) return;
+
+  try {
+    milkdownEditor.action((ctx) => {
+      const cmds = ctx.get(milkdownCommands.commandsCtx);
+      if (param !== undefined) {
+        cmds.call(command.key, param);
+      } else {
+        cmds.call(command.key);
+      }
+    });
+  } catch (err) {
+    console.warn('[markmedown] command failed:', err.message);
+  }
 }
 
 // --- Raw Mode Toggle ---
@@ -477,6 +520,7 @@ function setRawMode(raw) {
     milkdownEl.hidden = false;
     rawEditor.hidden = true;
     if (milkdownLoaded && state.currentFile) {
+      suppressNextChange = true;
       buildEditor(rawEditor.value).catch(() => setRawMode(true));
     }
   }
@@ -487,7 +531,6 @@ rawToggle.addEventListener('click', () => {
   setRawMode(!state.isRawMode);
 });
 
-// Raw editor change tracking
 rawEditor.addEventListener('input', scheduleAutoSave);
 
 // --- Keyboard Shortcuts ---
@@ -499,7 +542,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// --- VS Code Integration ---
+// --- VS Code ---
 
 async function checkVscode() {
   try {
@@ -530,9 +573,7 @@ newFileDialog.addEventListener('submit', async (e) => {
   e.preventDefault();
   let path = newFilePath.value.trim();
   if (!path) return;
-
   if (!path.endsWith('.md')) path += '.md';
-
   if (!path.startsWith('/')) {
     const home = await getHome();
     path = `${home}/${path}`;
@@ -589,8 +630,11 @@ function connectWebSocket() {
       if (msg.type === 'tree') {
         renderTree(msg.data);
         updateStatus(msg.totalFiles, msg.scanComplete);
-        if (state.currentFile) {
-          updateActiveFile(state.currentFile.path);
+        if (state.currentFile) updateActiveFile(state.currentFile.path);
+      } else if (msg.type === 'file-changed') {
+        // Auto-refresh if this is the currently open file
+        if (state.currentFile && msg.path === state.currentFile.path) {
+          reloadCurrentFile();
         }
       }
     } catch (err) {
@@ -603,7 +647,6 @@ function connectWebSocket() {
   });
 
   ws.addEventListener('error', () => {});
-
   state.ws = ws;
 }
 
@@ -612,8 +655,8 @@ function updateStatus(totalFiles, scanComplete) {
     fileCountEl.textContent = `${totalFiles} files`;
   }
   if (scanComplete) {
-    scanStatus.textContent = 'ready';
-    scanStatus.className = 'scan-complete';
+    scanStatus.className = 'status-dot status-ready';
+    scanStatus.title = 'Ready';
   }
 }
 
@@ -631,7 +674,7 @@ async function refreshTree() {
   }
 }
 
-// Poll for status until scan is complete (WebSocket may fail on large frames)
+// Poll until scan complete (WebSocket fallback for large payloads)
 function startStatusPoll() {
   const poll = setInterval(async () => {
     try {
@@ -648,6 +691,37 @@ function startStatusPoll() {
 
 // --- Toolbar Commands ---
 
+const COMMAND_MAP = {
+  toggleBold: () => executeMilkdownCommand(milkdownCommands?.toggleBold),
+  toggleItalic: () => executeMilkdownCommand(milkdownCommands?.toggleItalic),
+  toggleStrikethrough: () => executeMilkdownCommand(milkdownCommands?.toggleStrikethrough),
+  toggleInlineCode: () => executeMilkdownCommand(milkdownCommands?.toggleInlineCode),
+  heading1: () => executeMilkdownCommand(milkdownCommands?.wrapInHeading, 1),
+  heading2: () => executeMilkdownCommand(milkdownCommands?.wrapInHeading, 2),
+  heading3: () => executeMilkdownCommand(milkdownCommands?.wrapInHeading, 3),
+  bulletList: () => executeMilkdownCommand(milkdownCommands?.wrapInBulletList),
+  orderedList: () => executeMilkdownCommand(milkdownCommands?.wrapInOrderedList),
+  blockquote: () => executeMilkdownCommand(milkdownCommands?.wrapInBlockquote),
+  codeBlock: () => executeMilkdownCommand(milkdownCommands?.createCodeBlock),
+  hr: () => executeMilkdownCommand(milkdownCommands?.insertHr),
+  insertTable: () => executeMilkdownCommand(milkdownCommands?.insertTable),
+  insertLink: () => {
+    const url = prompt('URL:');
+    if (!url) return;
+    // Insert markdown link at cursor
+    milkdownEditor?.action((ctx) => {
+      const { editorViewCtx } = milkdownModules.core;
+      const view = ctx.get(editorViewCtx);
+      const { from, to } = view.state.selection;
+      const text = view.state.doc.textBetween(from, to) || 'link';
+      view.dispatch(view.state.tr.replaceWith(from, to,
+        view.state.schema.text(text, [view.state.schema.marks.link.create({ href: url })])
+      ));
+    });
+  },
+  insertImage: () => executeMilkdownCommand(milkdownCommands?.insertImage),
+};
+
 toolbar.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-command]');
   if (!btn || !state.currentFile) return;
@@ -656,8 +730,9 @@ toolbar.addEventListener('click', (e) => {
 
   if (state.isRawMode) {
     executeRawCommand(command);
+  } else {
+    COMMAND_MAP[command]?.();
   }
-  // WYSIWYG toolbar commands handled natively by Milkdown
 });
 
 function executeRawCommand(command) {
@@ -728,7 +803,6 @@ async function init() {
   connectWebSocket();
   await initMilkdown();
 
-  // Poll until scan is complete (WebSocket may not deliver large frames)
   if (!data?.scanComplete) {
     startStatusPoll();
   }

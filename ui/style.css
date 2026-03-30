@@ -3,23 +3,23 @@
    ================================================ */
 
 :root {
-  /* Catppuccin Mocha palette */
-  --bg-primary: #1e1e2e;
-  --bg-secondary: #181825;
-  --bg-surface: #242438;
-  --bg-hover: #313244;
-  --bg-active: #45475a;
-  --text-primary: #cdd6f4;
-  --text-secondary: #a6adc8;
-  --text-muted: #6c7086;
-  --accent: #89b4fa;
-  --accent-hover: #74c7ec;
-  --green: #a6e3a1;
-  --yellow: #f9e2af;
-  --red: #f38ba8;
-  --peach: #fab387;
-  --border: #313244;
-  --border-subtle: #262637;
+  /* Linear-inspired palette */
+  --bg-primary: #1F2023;
+  --bg-secondary: #191a1d;
+  --bg-surface: #27282B;
+  --bg-hover: #2D2F36;
+  --bg-active: #3B3C42;
+  --text-primary: #D5E4E7;
+  --text-secondary: #C1C3C8;
+  --text-muted: #6B6F7A;
+  --accent: #5E6AD2;
+  --accent-hover: #717CE1;
+  --green: #4CB782;
+  --yellow: #F2994A;
+  --red: #EB5757;
+  --peach: #C1C3C8;
+  --border: #303236;
+  --border-subtle: #27282B;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --sidebar-width: 280px;
@@ -274,19 +274,24 @@ body {
   color: var(--text-primary);
 }
 
-.scanning {
-  color: var(--yellow);
+/* Status dot */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
-.scanning::after {
-  content: '';
-  animation: pulse 1.5s ease-in-out infinite;
+.status-scanning {
+  background: var(--yellow);
+  animation: pulse-dot 1.5s ease-in-out infinite;
 }
-@keyframes pulse {
+@keyframes pulse-dot {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.3; }
 }
-.scan-complete {
-  color: var(--green);
+.status-ready {
+  background: var(--green);
 }
 
 /* File tree */
@@ -567,16 +572,12 @@ body {
 }
 
 .toolbar-btn-toggle {
-  background: var(--bg-hover);
-  font-weight: 500;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  padding: 4px 6px;
 }
-
-.toggle-label-wysiwyg { display: none; }
-body.raw-mode .toggle-label-raw { display: none; }
-body.raw-mode .toggle-label-wysiwyg { display: inline; }
+body.raw-mode #raw-toggle {
+  color: var(--accent);
+  background: rgba(94, 106, 210, 0.12);
+}
 
 .toolbar-btn-vscode {
   font-family: var(--font-sans);

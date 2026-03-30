@@ -6,7 +6,7 @@ import { loadIgnorePatterns, shouldIgnoreDir } from './ignore.js';
 
 const ignoreSet = loadIgnorePatterns();
 
-export function startWatcher(scanRoot, state, onChange) {
+export function startWatcher(scanRoot, state, onChange, onFileChanged) {
   // Check if recursive watching is viable
   if (process.platform === 'linux') {
     try {
@@ -26,7 +26,7 @@ export function startWatcher(scanRoot, state, onChange) {
   try {
     const watcher = fs.watch(scanRoot, { recursive: true }, (eventType, filename) => {
       if (!filename) return;
-      handleWatchEvent(eventType, filename, scanRoot, state, onChange);
+      handleWatchEvent(eventType, filename, scanRoot, state, onChange, onFileChanged);
     });
 
     watcher.on('error', (err) => {
@@ -47,7 +47,7 @@ export function startWatcher(scanRoot, state, onChange) {
 // Debounce map to avoid rapid-fire events for the same file
 const debounceTimers = new Map();
 
-function handleWatchEvent(eventType, filename, scanRoot, state, onChange) {
+function handleWatchEvent(eventType, filename, scanRoot, state, onChange, onFileChanged) {
   // Only care about .md files
   if (!filename.endsWith('.md')) return;
 
@@ -69,7 +69,8 @@ function handleWatchEvent(eventType, filename, scanRoot, state, onChange) {
 
   debounceTimers.set(fullPath, setTimeout(async () => {
     debounceTimers.delete(fullPath);
-    await processFileChange(fullPath, scanRoot, state, onChange);
+    const changed = await processFileChange(fullPath, scanRoot, state, onChange);
+    if (changed && onFileChanged) onFileChanged(fullPath);
   }, 300));
 }
 
@@ -77,30 +78,30 @@ async function processFileChange(fullPath, scanRoot, state, onChange) {
   try {
     const stat = await fsp.stat(fullPath);
 
-    // File exists — update or add
     const relativePath = path.relative(scanRoot, fullPath);
     const existing = state.files.get(fullPath);
 
-    // Skip if mtime hasn't changed
-    if (existing && existing.mtime === stat.mtimeMs) return;
+    if (existing && existing.mtime === stat.mtimeMs) return false;
 
     state.files.set(fullPath, {
       absolutePath: fullPath,
       relativePath,
       mtime: stat.mtimeMs,
       size: stat.size,
-      gitRoot: existing?.gitRoot ?? null, // preserve git root from scan
+      gitRoot: existing?.gitRoot ?? null,
     });
 
     onChange();
+    return true;
   } catch (err) {
     if (err.code === 'ENOENT') {
-      // File was deleted
       if (state.files.has(fullPath)) {
         state.files.delete(fullPath);
         onChange();
+        return true;
       }
     }
+    return false;
   }
 }
 

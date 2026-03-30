@@ -74,6 +74,12 @@ async function main() {
     state.tree = buildTree(state.files);
     broadcastUpdate(state);
     saveCache(state.files);
+  }, (changedPath) => {
+    // Notify browsers that a specific file changed (for auto-refresh)
+    const msg = JSON.stringify({ type: 'file-changed', path: changedPath });
+    for (const ws of state.wsClients) {
+      try { ws.send(msg); } catch {}
+    }
   });
 
   // Clean shutdown
