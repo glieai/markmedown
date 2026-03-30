@@ -6,6 +6,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { search as searchIndex, isIndexReady, getIndexedCount } from './indexer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, '..', 'ui');
@@ -77,7 +78,24 @@ function handleGetTree(state, res) {
     tree: state.tree,
     totalFiles: state.files.size,
     scanComplete: state.scanComplete,
+    indexReady: isIndexReady(),
+    indexedFiles: getIndexedCount(),
   }));
+}
+
+function handleSearch(req, state, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const query = url.searchParams.get('q') || '';
+
+  if (!query.trim()) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ results: [], indexReady: isIndexReady() }));
+    return;
+  }
+
+  const results = searchIndex(query, state.files);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ results, indexReady: isIndexReady() }));
 }
 
 async function handleGetFile(req, res) {
@@ -329,6 +347,8 @@ export function createServer(state, scanRoot) {
       // API routes
       if (pathname === '/api/tree' && req.method === 'GET') {
         handleGetTree(state, res);
+      } else if (pathname === '/api/search' && req.method === 'GET') {
+        handleSearch(req, state, res);
       } else if (pathname === '/api/file' && req.method === 'GET') {
         await handleGetFile(req, res);
       } else if (pathname === '/api/file' && req.method === 'PUT') {

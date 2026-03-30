@@ -2,8 +2,8 @@ import { createServer } from './server.js';
 import { scan, buildTree } from './scanner.js';
 import { loadCache, saveCache } from './cache.js';
 import { startWatcher } from './watcher.js';
+import { buildIndex } from './indexer.js';
 import os from 'node:os';
-import path from 'node:path';
 
 const port = parseInt(process.argv[2] || process.env.MARKMEDOWN_PORT || '44444', 10);
 const scanRoot = os.homedir();
@@ -62,12 +62,17 @@ async function main() {
   saveCache(state.files);
 
   // Notify connected browsers that scan is complete
-  broadcastTree(state);
+  broadcastUpdate(state);
+
+  // Build full-text search index in background
+  console.log(`[markmedown] building search index...`);
+  await buildIndex(state.files);
+  broadcastUpdate(state);
 
   // Start watching for changes
   startWatcher(scanRoot, state, () => {
     state.tree = buildTree(state.files);
-    broadcastTree(state);
+    broadcastUpdate(state);
     saveCache(state.files);
   });
 
@@ -81,8 +86,13 @@ async function main() {
   process.on('SIGINT', shutdown);
 }
 
-function broadcastTree(state) {
-  const msg = JSON.stringify({ type: 'tree', data: state.tree });
+function broadcastUpdate(state) {
+  const msg = JSON.stringify({
+    type: 'tree',
+    data: state.tree,
+    totalFiles: state.files.size,
+    scanComplete: state.scanComplete,
+  });
   for (const ws of state.wsClients) {
     try { ws.send(msg); } catch {}
   }

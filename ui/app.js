@@ -5,11 +5,10 @@
 // --- State ---
 
 const state = {
-  currentFile: null,       // { path, content, mtime }
+  currentFile: null,       // { path, content, mtime, fileInfo }
   isRawMode: false,
   isDirty: false,
   editorReady: false,
-  milkdownInstance: null,
   vscodeAvailable: false,
   ws: null,
 };
@@ -19,14 +18,18 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 const fileTree = $('#file-tree');
 const searchInput = $('#search-input');
+const searchResults = $('#search-results');
+const searchResultsList = $('#search-results-list');
+const searchResultsCount = $('#search-results-count');
+const searchClear = $('#search-clear');
 const emptyState = $('#empty-state');
 const fileHeader = $('#file-header');
 const toolbar = $('#toolbar');
 const editorContainer = $('#editor-container');
 const milkdownEl = $('#milkdown-editor');
 const rawEditor = $('#raw-editor');
-const filePath = $('#file-path');
-const fileSize = $('#file-size');
+const filePathEl = $('#file-path');
+const fileSizeEl = $('#file-size');
 const gitBadge = $('#git-badge');
 const gitRepoName = $('#git-repo-name');
 const saveIndicator = $('#save-indicator');
@@ -36,11 +39,12 @@ const newFileBtn = $('#new-file-btn');
 const newFileDialog = $('#new-file-dialog');
 const newFilePath = $('#new-file-path');
 const newFileCancel = $('#new-file-cancel');
-const newFileCreate = $('#new-file-create');
-const fileCount = $('#file-count');
+const fileCountEl = $('#file-count');
 const scanStatus = $('#scan-status');
 const largeFileWarning = $('#large-file-warning');
-const largeFileSize = $('#large-file-size');
+const largeFileSizeEl = $('#large-file-size');
+const collapseAllBtn = $('#collapse-all');
+const expandAllBtn = $('#expand-all');
 
 // --- API ---
 
@@ -63,55 +67,29 @@ function renderTree(tree) {
 }
 
 function renderNode(node, parent, depth) {
-  // Render files first in root, folders first otherwise
-  if (depth > 0) {
-    // Render subdirectories
-    for (const child of node.children) {
-      const details = document.createElement('details');
-      details.className = 'tree-folder';
-      if (depth < 2) details.open = true; // auto-expand first 2 levels
+  // Render subdirectories
+  for (const child of node.children) {
+    const details = document.createElement('details');
+    details.className = 'tree-folder';
+    // Only expand first level by default
+    if (depth === 0) details.open = true;
 
-      const summary = document.createElement('summary');
-      summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
-      details.appendChild(summary);
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
+    details.appendChild(summary);
 
-      const content = document.createElement('div');
-      content.className = 'tree-content';
-      details.appendChild(content);
+    const content = document.createElement('div');
+    content.className = 'tree-content';
+    details.appendChild(content);
 
-      renderNode(child, content, depth + 1);
-      parent.appendChild(details);
-    }
+    renderNode(child, content, depth + 1);
+    parent.appendChild(details);
+  }
 
-    // Render files
-    for (const file of node.files) {
-      const btn = createFileButton(file);
-      parent.appendChild(btn);
-    }
-  } else {
-    // Root level: render children
-    for (const child of node.children) {
-      const details = document.createElement('details');
-      details.className = 'tree-folder';
-      details.open = true;
-
-      const summary = document.createElement('summary');
-      summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
-      details.appendChild(summary);
-
-      const content = document.createElement('div');
-      content.className = 'tree-content';
-      details.appendChild(content);
-
-      renderNode(child, content, depth + 1);
-      parent.appendChild(details);
-    }
-
-    // Root files
-    for (const file of node.files) {
-      const btn = createFileButton(file);
-      parent.appendChild(btn);
-    }
+  // Render files
+  for (const file of node.files) {
+    const btn = createFileButton(file);
+    parent.appendChild(btn);
   }
 }
 
@@ -131,40 +109,158 @@ function createFileButton(file) {
   return btn;
 }
 
-function updateActiveFile(filePath) {
+function updateActiveFile(path) {
   fileTree.querySelectorAll('.tree-file').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.path === filePath);
+    btn.classList.toggle('active', btn.dataset.path === path);
   });
 }
 
-// --- Search / Filter ---
+// --- Tree Controls ---
 
-searchInput.addEventListener('input', () => {
-  const query = searchInput.value.toLowerCase().trim();
-  filterTree(fileTree, query);
+collapseAllBtn.addEventListener('click', () => {
+  fileTree.querySelectorAll('.tree-folder').forEach((d) => d.open = false);
 });
 
-function filterTree(container, query) {
+expandAllBtn.addEventListener('click', () => {
+  fileTree.querySelectorAll('.tree-folder').forEach((d) => d.open = true);
+});
+
+// --- Search ---
+
+let searchDebounce = null;
+
+searchInput.addEventListener('input', () => {
+  const query = searchInput.value.trim();
+
+  clearTimeout(searchDebounce);
+
   if (!query) {
-    container.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
+    hideSearchResults();
+    return;
+  }
+
+  // Short queries: filter tree locally (file/folder names)
+  if (query.length < 3) {
+    hideSearchResults();
+    filterTreeLocal(query.toLowerCase());
+    return;
+  }
+
+  // 3+ chars: debounce and call the server search API (full-text)
+  searchDebounce = setTimeout(() => runSearch(query), 200);
+});
+
+searchClear.addEventListener('click', () => {
+  searchInput.value = '';
+  hideSearchResults();
+  // Unhide all tree items
+  fileTree.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
+});
+
+function hideSearchResults() {
+  searchResults.hidden = true;
+  fileTree.hidden = false;
+}
+
+function filterTreeLocal(query) {
+  if (!query) {
+    fileTree.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
     return;
   }
 
   // Process files
-  container.querySelectorAll('.tree-file').forEach((btn) => {
+  fileTree.querySelectorAll('.tree-file').forEach((btn) => {
     const name = btn.querySelector('.tree-file-name').textContent.toLowerCase();
     const path = (btn.dataset.path || '').toLowerCase();
     const matches = name.includes(query) || path.includes(query);
     btn.classList.toggle('tree-hidden', !matches);
   });
 
-  // Process folders — hide if no visible children
-  container.querySelectorAll('.tree-folder').forEach((details) => {
+  // Process folders — hide if no visible children, also match folder name
+  const folders = [...fileTree.querySelectorAll('.tree-folder')].reverse();
+  for (const details of folders) {
+    const folderName = details.querySelector('.tree-folder-name')?.textContent.toLowerCase() || '';
     const content = details.querySelector('.tree-content');
-    const hasVisibleChild = content.querySelector('.tree-file:not(.tree-hidden), .tree-folder:not(.tree-hidden)');
-    details.classList.toggle('tree-hidden', !hasVisibleChild);
-    if (hasVisibleChild && query) details.open = true;
-  });
+    const hasVisibleChild = content?.querySelector('.tree-file:not(.tree-hidden), .tree-folder:not(.tree-hidden)');
+    const folderMatches = folderName.includes(query);
+
+    if (folderMatches) {
+      // Show folder and all its contents
+      details.classList.remove('tree-hidden');
+      details.open = true;
+      details.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
+    } else if (hasVisibleChild) {
+      details.classList.remove('tree-hidden');
+      details.open = true;
+    } else {
+      details.classList.add('tree-hidden');
+    }
+  }
+}
+
+async function runSearch(query) {
+  try {
+    const data = await api('GET', `/api/search?q=${encodeURIComponent(query)}`);
+    showSearchResults(data.results, query, data.indexReady);
+  } catch (err) {
+    console.error('[markmedown] search error:', err);
+  }
+}
+
+function showSearchResults(results, query, indexReady) {
+  fileTree.hidden = true;
+  searchResults.hidden = false;
+
+  const indexLabel = indexReady ? '' : ' (indexing...)';
+  searchResultsCount.textContent = `${results.length} results${indexLabel}`;
+
+  searchResultsList.innerHTML = '';
+
+  if (results.length === 0) {
+    searchResultsList.innerHTML = '<div class="search-no-results">No results found</div>';
+    return;
+  }
+
+  for (const result of results) {
+    const item = document.createElement('button');
+    item.className = 'search-result-item';
+    item.dataset.path = result.path;
+
+    const snippet = highlightSnippet(result.snippet, query);
+    const pathDisplay = result.relativePath.replace(/^/, '~/');
+
+    item.innerHTML = `
+      <div class="search-result-name">
+        <span class="tree-file-icon">📄</span>
+        ${escapeHtml(result.name)}
+        ${result.gitRoot ? `<span class="tree-file-git">⬡</span>` : ''}
+      </div>
+      <div class="search-result-path">${escapeHtml(pathDisplay)}</div>
+      ${snippet ? `<div class="search-result-snippet">${snippet}</div>` : ''}
+    `;
+
+    item.addEventListener('click', () => {
+      openFile(result.path, result);
+      // Clear search after opening
+      searchInput.value = '';
+      hideSearchResults();
+      fileTree.querySelectorAll('.tree-hidden').forEach((el) => el.classList.remove('tree-hidden'));
+    });
+
+    searchResultsList.appendChild(item);
+  }
+}
+
+function highlightSnippet(text, query) {
+  if (!text) return '';
+  const truncated = text.length > 150 ? text.slice(0, 150) + '...' : text;
+  const escaped = escapeHtml(truncated);
+  const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+  return escaped.replace(regex, '<mark>$1</mark>');
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // --- File Operations ---
@@ -182,18 +278,19 @@ async function openFile(path, fileInfo) {
       return;
     }
 
-    state.currentFile = { path, content: data.content, mtime: data.mtime };
+    state.currentFile = { path, content: data.content, mtime: data.mtime, fileInfo };
     state.isDirty = false;
 
-    // Update UI
+    // Update UI — show editor area
     emptyState.hidden = true;
     fileHeader.hidden = false;
     toolbar.hidden = false;
     editorContainer.hidden = false;
     saveIndicator.hidden = true;
+    largeFileWarning.hidden = true;
 
-    filePath.textContent = path.replace(/^\/home\/[^/]+\//, '~/');
-    fileSize.textContent = formatSize(data.size);
+    filePathEl.textContent = path.replace(/^\/home\/[^/]+\//, '~/');
+    fileSizeEl.textContent = formatSize(data.size);
 
     // Git badge
     if (fileInfo?.gitRoot) {
@@ -204,15 +301,13 @@ async function openFile(path, fileInfo) {
     }
 
     // Large file handling
-    const isLarge = data.size > 512000; // 500KB
-    const isVeryLarge = data.size > 2097152; // 2MB
-    largeFileWarning.hidden = !isLarge;
+    const isLarge = data.size > 512000;
+    const isVeryLarge = data.size > 2097152;
     if (isLarge) {
-      largeFileSize.textContent = formatSize(data.size);
+      largeFileWarning.hidden = false;
+      largeFileSizeEl.textContent = formatSize(data.size);
     }
-
     if (isVeryLarge) {
-      // Force raw mode for very large files
       setRawMode(true);
     }
 
@@ -247,6 +342,7 @@ async function saveCurrentFile() {
 // Debounced auto-save
 let saveTimer = null;
 function scheduleAutoSave() {
+  if (!state.currentFile) return; // Don't mark dirty without a file
   state.isDirty = true;
   saveIndicator.hidden = false;
   clearTimeout(saveTimer);
@@ -261,17 +357,18 @@ let milkdownEditor = null;
 let milkdownLoaded = false;
 
 // The listener callback stores the latest markdown here on every change.
-// This is the single source of truth for "what does the WYSIWYG editor contain?"
 let latestMarkdown = '';
+
+const MILKDOWN_VERSION = '7.20.0';
 
 async function loadMilkdownModules() {
   if (milkdownModules) return milkdownModules;
 
   const [core, commonmarkMod, gfmMod, listenerMod] = await Promise.all([
-    import('https://esm.sh/@milkdown/core@7.5.0'),
-    import('https://esm.sh/@milkdown/preset-commonmark@7.5.0'),
-    import('https://esm.sh/@milkdown/preset-gfm@7.5.0'),
-    import('https://esm.sh/@milkdown/plugin-listener@7.5.0'),
+    import(`https://esm.sh/@milkdown/core@${MILKDOWN_VERSION}`),
+    import(`https://esm.sh/@milkdown/preset-commonmark@${MILKDOWN_VERSION}`),
+    import(`https://esm.sh/@milkdown/preset-gfm@${MILKDOWN_VERSION}`),
+    import(`https://esm.sh/@milkdown/plugin-listener@${MILKDOWN_VERSION}`),
   ]);
 
   milkdownModules = { core, commonmarkMod, gfmMod, listenerMod };
@@ -287,7 +384,7 @@ async function buildEditor(markdown) {
 
   // Destroy existing editor
   if (milkdownEditor) {
-    try { milkdownEditor.destroy(); } catch {}
+    try { await milkdownEditor.destroy(); } catch {}
     milkdownEditor = null;
   }
   milkdownEl.innerHTML = '';
@@ -316,13 +413,13 @@ async function buildEditor(markdown) {
 
 async function initMilkdown() {
   try {
-    await buildEditor('');
+    await loadMilkdownModules();
     milkdownLoaded = true;
     state.editorReady = true;
-    console.log('[markmedown] editor ready');
+    console.log('[markmedown] editor modules loaded');
   } catch (err) {
     console.error('[markmedown] failed to load Milkdown:', err);
-    setRawMode(true);
+    state.isRawMode = true;
     rawToggle.disabled = true;
     rawToggle.title = 'WYSIWYG editor failed to load';
   }
@@ -333,7 +430,15 @@ function setEditorContent(markdown) {
   rawEditor.value = markdown;
   latestMarkdown = markdown;
 
-  if (state.isRawMode || !milkdownLoaded) return;
+  if (state.isRawMode || !milkdownLoaded) {
+    // In raw mode, just show textarea
+    milkdownEl.hidden = true;
+    rawEditor.hidden = false;
+    return;
+  }
+
+  milkdownEl.hidden = false;
+  rawEditor.hidden = true;
 
   // Rebuild WYSIWYG with new content
   buildEditor(markdown).catch((err) => {
@@ -346,7 +451,6 @@ function getEditorContent() {
   if (state.isRawMode) {
     return rawEditor.value;
   }
-  // latestMarkdown is kept in sync by the listener callback
   return latestMarkdown || rawEditor.value;
 }
 
@@ -357,25 +461,23 @@ function setRawMode(raw) {
   document.body.classList.toggle('raw-mode', raw);
 
   if (raw) {
-    // Sync latest WYSIWYG content to raw editor
     rawEditor.value = latestMarkdown || state.currentFile?.content || '';
     milkdownEl.hidden = true;
     rawEditor.hidden = false;
-    rawEditor.focus();
+    if (state.currentFile) rawEditor.focus();
   } else {
     milkdownEl.hidden = false;
     rawEditor.hidden = true;
-    // Rebuild WYSIWYG with current raw content
-    if (milkdownLoaded) {
-      buildEditor(rawEditor.value).catch(() => {
-        // If rebuild fails, stay in raw mode
-        setRawMode(true);
-      });
+    if (milkdownLoaded && state.currentFile) {
+      buildEditor(rawEditor.value).catch(() => setRawMode(true));
     }
   }
 }
 
-rawToggle.addEventListener('click', () => setRawMode(!state.isRawMode));
+rawToggle.addEventListener('click', () => {
+  if (!state.currentFile) return;
+  setRawMode(!state.isRawMode);
+});
 
 // Raw editor change tracking
 rawEditor.addEventListener('input', scheduleAutoSave);
@@ -383,7 +485,6 @@ rawEditor.addEventListener('input', scheduleAutoSave);
 // --- Keyboard Shortcuts ---
 
 document.addEventListener('keydown', (e) => {
-  // Ctrl+S / Cmd+S → save
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
     saveCurrentFile();
@@ -422,10 +523,8 @@ newFileDialog.addEventListener('submit', async (e) => {
   let path = newFilePath.value.trim();
   if (!path) return;
 
-  // Ensure .md extension
   if (!path.endsWith('.md')) path += '.md';
 
-  // Ensure absolute path
   if (!path.startsWith('/')) {
     const home = await getHome();
     path = `${home}/${path}`;
@@ -435,7 +534,6 @@ newFileDialog.addEventListener('submit', async (e) => {
     const data = await api('POST', '/api/file', { path });
     if (data.ok) {
       newFileDialog.close();
-      // Refresh tree and open new file
       refreshTree();
       setTimeout(() => openFile(data.path, null), 500);
     } else {
@@ -446,19 +544,16 @@ newFileDialog.addEventListener('submit', async (e) => {
   }
 });
 
-// Cache home dir
 let _home = null;
 async function getHome() {
   if (!_home) {
-    // Derive from current file paths
     const data = await api('GET', '/api/tree');
     const firstFile = findFirstFile(data.tree);
     if (firstFile) {
-      // Extract home from absolute path
       const parts = firstFile.path.split('/');
-      _home = '/' + parts[1] + '/' + parts[2]; // /home/username
+      _home = '/' + parts[1] + '/' + parts[2];
     } else {
-      _home = '/home/' + 'user';
+      _home = '/home/user';
     }
   }
   return _home;
@@ -485,14 +580,7 @@ function connectWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'tree') {
         renderTree(msg.data);
-        if (msg.totalFiles !== undefined) {
-          fileCount.textContent = `${msg.totalFiles} files`;
-        }
-        if (msg.scanComplete) {
-          scanStatus.textContent = 'ready';
-          scanStatus.className = 'scan-complete';
-        }
-        // Re-highlight active file
+        updateStatus(msg.totalFiles, msg.scanComplete);
         if (state.currentFile) {
           updateActiveFile(state.currentFile.path);
         }
@@ -503,15 +591,22 @@ function connectWebSocket() {
   });
 
   ws.addEventListener('close', () => {
-    console.log('[markmedown] ws disconnected, reconnecting in 3s...');
     setTimeout(connectWebSocket, 3000);
   });
 
-  ws.addEventListener('error', () => {
-    // Will trigger close event
-  });
+  ws.addEventListener('error', () => {});
 
   state.ws = ws;
+}
+
+function updateStatus(totalFiles, scanComplete) {
+  if (totalFiles !== undefined) {
+    fileCountEl.textContent = `${totalFiles} files`;
+  }
+  if (scanComplete) {
+    scanStatus.textContent = 'ready';
+    scanStatus.className = 'scan-complete';
+  }
 }
 
 // --- Tree Refresh ---
@@ -520,11 +615,7 @@ async function refreshTree() {
   try {
     const data = await api('GET', '/api/tree');
     renderTree(data.tree);
-    fileCount.textContent = `${data.totalFiles} files`;
-    if (data.scanComplete) {
-      scanStatus.textContent = 'ready';
-      scanStatus.className = 'scan-complete';
-    }
+    updateStatus(data.totalFiles, data.scanComplete);
   } catch (err) {
     console.error('[markmedown] failed to refresh tree:', err);
   }
@@ -534,15 +625,14 @@ async function refreshTree() {
 
 toolbar.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-command]');
-  if (!btn) return;
+  if (!btn || !state.currentFile) return;
 
   const command = btn.dataset.command;
 
   if (state.isRawMode) {
     executeRawCommand(command);
-  } else {
-    executeMilkdownCommand(command);
   }
+  // WYSIWYG toolbar commands handled natively by Milkdown
 });
 
 function executeRawCommand(command) {
@@ -570,57 +660,25 @@ function executeRawCommand(command) {
       replacement = `\`${selected || 'code'}\``;
       cursorOffset = selected ? 0 : -1;
       break;
-    case 'heading1':
-      replacement = `# ${selected || 'Heading 1'}`;
-      break;
-    case 'heading2':
-      replacement = `## ${selected || 'Heading 2'}`;
-      break;
-    case 'heading3':
-      replacement = `### ${selected || 'Heading 3'}`;
-      break;
-    case 'bulletList':
-      replacement = `- ${selected || 'Item'}`;
-      break;
-    case 'orderedList':
-      replacement = `1. ${selected || 'Item'}`;
-      break;
-    case 'taskList':
-      replacement = `- [ ] ${selected || 'Task'}`;
-      break;
-    case 'blockquote':
-      replacement = `> ${selected || 'Quote'}`;
-      break;
-    case 'codeBlock':
-      replacement = `\`\`\`\n${selected || 'code'}\n\`\`\``;
-      break;
-    case 'hr':
-      replacement = '\n---\n';
-      break;
-    case 'insertTable':
-      replacement = '\n| Header | Header |\n|--------|--------|\n| Cell   | Cell   |\n';
-      break;
-    case 'insertLink':
-      replacement = `[${selected || 'text'}](url)`;
-      break;
-    case 'insertImage':
-      replacement = `![${selected || 'alt'}](url)`;
-      break;
-    default:
-      return;
+    case 'heading1': replacement = `# ${selected || 'Heading 1'}`; break;
+    case 'heading2': replacement = `## ${selected || 'Heading 2'}`; break;
+    case 'heading3': replacement = `### ${selected || 'Heading 3'}`; break;
+    case 'bulletList': replacement = `- ${selected || 'Item'}`; break;
+    case 'orderedList': replacement = `1. ${selected || 'Item'}`; break;
+    case 'taskList': replacement = `- [ ] ${selected || 'Task'}`; break;
+    case 'blockquote': replacement = `> ${selected || 'Quote'}`; break;
+    case 'codeBlock': replacement = `\`\`\`\n${selected || 'code'}\n\`\`\``; break;
+    case 'hr': replacement = '\n---\n'; break;
+    case 'insertTable': replacement = '\n| Header | Header |\n|--------|--------|\n| Cell   | Cell   |\n'; break;
+    case 'insertLink': replacement = `[${selected || 'text'}](url)`; break;
+    case 'insertImage': replacement = `![${selected || 'alt'}](url)`; break;
+    default: return;
   }
 
   rawEditor.value = text.substring(0, start) + replacement + text.substring(end);
   rawEditor.selectionStart = rawEditor.selectionEnd = start + replacement.length + cursorOffset;
   rawEditor.focus();
   scheduleAutoSave();
-}
-
-function executeMilkdownCommand(command) {
-  // Milkdown commands would go through the editor's command system
-  // For now, this is a placeholder — proper implementation needs
-  // access to Milkdown's callCommand API
-  console.log('[markmedown] toolbar command:', command);
 }
 
 // --- Utilities ---
@@ -640,16 +698,9 @@ function formatSize(bytes) {
 // --- Init ---
 
 async function init() {
-  // Fetch initial tree
   await refreshTree();
-
-  // Check VS Code availability
   checkVscode();
-
-  // Connect WebSocket for live updates
   connectWebSocket();
-
-  // Initialize Milkdown editor
   await initMilkdown();
 }
 
