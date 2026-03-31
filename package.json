@@ -1,5 +1,5 @@
 {
-  "name": "markmedown",
+  "name": "@glie/markmedown",
   "version": "0.1.0",
   "description": "Browse and edit all your markdown files in a beautiful browser UI",
   "type": "module",
