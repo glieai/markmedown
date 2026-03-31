@@ -25,13 +25,13 @@ markmedown fills the gap.
 ## Install
 
 ```bash
-npm install -g markmedown
+npm install -g @glie/markmedown
 ```
 
 Or run directly:
 
 ```bash
-npx markmedown
+npx @glie/markmedown
 ```
 
 Or clone and link:
