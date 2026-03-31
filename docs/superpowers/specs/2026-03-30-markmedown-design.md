@@ -1,3 +1,8 @@
+> **Tipo:** Spec · **Status:** 🟡 Draft · **Actualizado:** 2026-03-30
+> Design spec for markmedown — a zero-config CLI tool to browse and edit all markdown files in an Obsidian-inspired browser UI.
+
+---
+
 # markmedown — Design Spec
 
 ## Context

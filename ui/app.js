@@ -296,6 +296,8 @@ async function openFile(path, fileInfo) {
     largeFileWarning.hidden = true;
 
     filePathEl.textContent = path.replace(/^\/home\/[^/]+\//, '~/');
+    filePathEl.title = 'Click to copy path';
+    filePathEl.dataset.fullPath = path;
     fileSizeEl.textContent = formatSize(data.size);
 
     if (fileInfo?.gitRoot) {
@@ -629,6 +631,31 @@ rawToggle.addEventListener('click', () => {
 });
 
 rawEditor.addEventListener('input', scheduleAutoSave);
+
+// --- Copy Path ---
+
+filePathEl.style.cursor = 'pointer';
+filePathEl.addEventListener('click', async () => {
+  const fullPath = filePathEl.dataset.fullPath;
+  if (!fullPath) return;
+  try {
+    await navigator.clipboard.writeText(fullPath);
+    const original = filePathEl.textContent;
+    filePathEl.textContent = 'Copied!';
+    setTimeout(() => { filePathEl.textContent = original; }, 1000);
+  } catch {
+    // Fallback
+    const input = document.createElement('input');
+    input.value = fullPath;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    input.remove();
+    const original = filePathEl.textContent;
+    filePathEl.textContent = 'Copied!';
+    setTimeout(() => { filePathEl.textContent = original; }, 1000);
+  }
+});
 
 // --- Keyboard Shortcuts ---
 
