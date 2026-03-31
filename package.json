@@ -19,7 +19,20 @@
     "knowledge-base",
     "editor",
     "browser",
-    "cli"
+    "cli",
+    "wysiwyg",
+    "milkdown",
+    "obsidian",
+    "notes"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/glieai/markmedown.git"
+  },
+  "homepage": "https://github.com/glieai/markmedown",
+  "bugs": {
+    "url": "https://github.com/glieai/markmedown/issues"
+  },
+  "author": "GLIE AI"
 }
