@@ -11,6 +11,8 @@ const state = {
   editorReady: false,
   vscodeAvailable: false,
   ws: null,
+  favorites: new Set(),    // Set of favorite paths
+  activeTab: 'files',      // 'files' or 'favorites'
 };
 
 // --- DOM References ---
@@ -45,6 +47,12 @@ const largeFileWarning = $('#large-file-warning');
 const largeFileSizeEl = $('#large-file-size');
 const collapseAllBtn = $('#collapse-all');
 const expandAllBtn = $('#expand-all');
+const tabFiles = $('#tab-files');
+const tabFavorites = $('#tab-favorites');
+const tabPanelFiles = $('#tab-panel-files');
+const tabPanelFavorites = $('#tab-panel-favorites');
+const favoritesList = $('#favorites-list');
+const favoritesEmpty = $('#favorites-empty');
 
 // --- API ---
 
@@ -74,6 +82,11 @@ function renderNode(node, parent, depth) {
 
     const summary = document.createElement('summary');
     summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
+
+    // Per-folder favorite star (appears on hover)
+    const folderStar = createStarButton(child.absolutePath || child.path);
+    folderStar.classList.add('folder-star');
+    summary.appendChild(folderStar);
 
     // Per-folder recursive toggle (appears on hover)
     const toggle = document.createElement('button');
@@ -126,7 +139,13 @@ function createFileButton(file) {
   }
   btn.innerHTML = html;
 
-  btn.addEventListener('click', () => openFile(file.path, file));
+  const star = createStarButton(file.path);
+  btn.appendChild(star);
+
+  btn.addEventListener('click', (e) => {
+    if (e.target.closest('.fav-star')) return;
+    openFile(file.path, file);
+  });
   return btn;
 }
 
@@ -295,10 +314,25 @@ async function openFile(path, fileInfo) {
     saveIndicator.hidden = true;
     largeFileWarning.hidden = true;
 
-    filePathEl.textContent = path.replace(/^\/home\/[^/]+\//, '~/');
+    filePathEl.textContent = path.replace(/^\/home\/[^/]+\//, '~/').replace(/^\/Users\/[^/]+\//, '~/');
     filePathEl.title = 'Click to copy path';
     filePathEl.dataset.fullPath = path;
     fileSizeEl.textContent = formatSize(data.size);
+
+    // Update header star
+    let headerStar = $('#file-header-star');
+    if (!headerStar) {
+      headerStar = document.createElement('button');
+      headerStar.id = 'file-header-star';
+      headerStar.className = 'fav-star fav-star-header';
+      headerStar.title = 'Toggle favorite';
+      headerStar.innerHTML = '★';
+      filePathEl.parentElement.insertBefore(headerStar, filePathEl);
+      headerStar.addEventListener('click', () => {
+        if (state.currentFile) toggleFavorite(state.currentFile.path);
+      });
+    }
+    headerStar.classList.toggle('fav-active', state.favorites.has(path));
 
     if (fileInfo?.gitRoot) {
       gitBadge.hidden = false;
@@ -963,11 +997,205 @@ function setupAnchorLinks() {
   });
 }
 
+// --- Sidebar Tabs ---
+
+function switchTab(tab) {
+  state.activeTab = tab;
+  tabFiles.classList.toggle('active', tab === 'files');
+  tabFavorites.classList.toggle('active', tab === 'favorites');
+  tabPanelFiles.hidden = tab !== 'files';
+  tabPanelFavorites.hidden = tab !== 'favorites';
+
+  if (tab === 'favorites') {
+    renderFavorites();
+  }
+}
+
+tabFiles.addEventListener('click', () => switchTab('files'));
+tabFavorites.addEventListener('click', () => switchTab('favorites'));
+
+// --- Favorites ---
+
+async function loadFavorites() {
+  try {
+    const data = await api('GET', '/api/favorites');
+    state.favorites = new Set(data.favorites.map((f) => f.path));
+    if (state.activeTab === 'favorites') renderFavorites();
+    // Update star buttons in tree
+    updateFavoriteStars();
+  } catch (err) {
+    console.error('[markmedown] failed to load favorites:', err);
+  }
+}
+
+async function toggleFavorite(filePath) {
+  try {
+    const data = await api('POST', '/api/favorites', { path: filePath });
+    if (data.favorite) {
+      state.favorites.add(filePath);
+    } else {
+      state.favorites.delete(filePath);
+    }
+    updateFavoriteStars();
+    if (state.activeTab === 'favorites') renderFavorites();
+    updateFileHeaderStar();
+  } catch (err) {
+    console.error('[markmedown] failed to toggle favorite:', err);
+  }
+}
+
+function updateFavoriteStars() {
+  fileTree.querySelectorAll('.fav-star').forEach((star) => {
+    const path = star.dataset.path;
+    star.classList.toggle('fav-active', state.favorites.has(path));
+  });
+}
+
+function updateFileHeaderStar() {
+  const star = $('#file-header-star');
+  if (!star || !state.currentFile) return;
+  star.classList.toggle('fav-active', state.favorites.has(state.currentFile.path));
+}
+
+function createStarButton(filePath) {
+  const star = document.createElement('button');
+  star.className = 'fav-star' + (state.favorites.has(filePath) ? ' fav-active' : '');
+  star.dataset.path = filePath;
+  star.title = 'Toggle favorite';
+  star.innerHTML = '★';
+  star.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFavorite(filePath);
+  });
+  return star;
+}
+
+async function renderFavorites() {
+  try {
+    const data = await api('GET', '/api/favorites');
+    const items = data.favorites;
+
+    favoritesEmpty.hidden = items.length > 0;
+    favoritesList.innerHTML = '';
+
+    for (const item of items) {
+      if (item.type === 'folder') {
+        renderFavoriteFolder(item);
+      } else {
+        renderFavoriteFile(item);
+      }
+    }
+
+    if (state.currentFile) {
+      favoritesList.querySelectorAll('.tree-file').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.path === state.currentFile.path);
+      });
+    }
+  } catch (err) {
+    console.error('[markmedown] failed to render favorites:', err);
+  }
+}
+
+function renderFavoriteFolder(item) {
+  const details = document.createElement('details');
+  details.className = 'tree-folder fav-folder';
+  details.open = true;
+
+  const summary = document.createElement('summary');
+  summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(item.name)}</span>`;
+  const removeStar = createStarButton(item.path);
+  removeStar.classList.add('folder-star');
+  summary.appendChild(removeStar);
+  details.appendChild(summary);
+
+  const content = document.createElement('div');
+  content.className = 'tree-content';
+
+  // Build a subtree from the folder's files grouped by sub-directories
+  const files = item.files || [];
+  const subTree = { children: {}, files: [] };
+
+  for (const f of files) {
+    const parts = f.subPath.split('/');
+    let node = subTree;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node.children[parts[i]]) {
+        node.children[parts[i]] = { name: parts[i], children: {}, files: [] };
+      }
+      node = node.children[parts[i]];
+    }
+    node.files.push(f);
+  }
+
+  renderFavSubtree(subTree, content);
+  details.appendChild(content);
+  favoritesList.appendChild(details);
+}
+
+function renderFavSubtree(node, parent) {
+  // Render sub-folders
+  const sortedChildren = Object.values(node.children).sort((a, b) => a.name.localeCompare(b.name));
+  for (const child of sortedChildren) {
+    const details = document.createElement('details');
+    details.className = 'tree-folder';
+    details.open = false;
+
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
+    details.appendChild(summary);
+
+    const content = document.createElement('div');
+    content.className = 'tree-content';
+    renderFavSubtree(child, content);
+    details.appendChild(content);
+    parent.appendChild(details);
+  }
+
+  // Render files
+  const sortedFiles = [...node.files].sort((a, b) => a.name.localeCompare(b.name));
+  for (const file of sortedFiles) {
+    const btn = document.createElement('button');
+    btn.className = 'tree-file';
+    btn.dataset.path = file.path;
+    btn.title = file.relativePath;
+
+    let html = `<span class="tree-file-icon">📄</span><span class="tree-file-name">${escapeHtml(file.name)}</span>`;
+    if (file.gitRoot) {
+      html += `<span class="tree-file-git" title="${escapeHtml(file.gitRoot)}">git</span>`;
+    }
+    btn.innerHTML = html;
+    btn.addEventListener('click', () => openFile(file.path, file));
+    parent.appendChild(btn);
+  }
+}
+
+function renderFavoriteFile(item) {
+  const btn = document.createElement('button');
+  btn.className = 'tree-file fav-item';
+  btn.dataset.path = item.path;
+  btn.title = item.relativePath;
+  let html = `<span class="tree-file-icon">📄</span><span class="tree-file-name">${escapeHtml(item.name)}</span>`;
+  if (item.gitRoot) {
+    html += `<span class="tree-file-git" title="${escapeHtml(item.gitRoot)}">git</span>`;
+  }
+  btn.innerHTML = html;
+  const removeStar = createStarButton(item.path);
+  btn.appendChild(removeStar);
+
+  btn.addEventListener('click', (e) => {
+    if (e.target.closest('.fav-star')) return;
+    openFile(item.path, item);
+  });
+  favoritesList.appendChild(btn);
+}
+
 // --- Init ---
 
 async function init() {
   const data = await refreshTree();
   checkVscode();
+  loadFavorites();
   connectWebSocket();
   await initMilkdown();
 

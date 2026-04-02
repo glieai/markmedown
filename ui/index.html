@@ -41,27 +41,54 @@
       <div id="search-results-list" class="search-results-list"></div>
     </div>
 
-    <div class="sidebar-stats" id="sidebar-stats">
-      <span id="file-count">0 files</span>
-      <span id="scan-status" class="status-dot status-scanning" title="Scanning..."></span>
-    </div>
-
-    <div class="tree-controls" id="tree-controls">
-      <button id="collapse-all" class="tree-control-btn" title="Collapse all folders">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M7.976 5.928L3.62 10.285 3 9.667 7.976 4.7l4.976 4.967-.62.618z"/>
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-tab="files" id="tab-files">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 3h5l2 2h5v8H2z"/>
         </svg>
+        Files
       </button>
-      <button id="expand-all" class="tree-control-btn" title="Expand all folders">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M7.976 10.072l4.357-4.357.62.618L7.975 11.3 3 6.333l.619-.618z"/>
+      <button class="sidebar-tab" data-tab="favorites" id="tab-favorites">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M8 1.5l2 4.5 5 .5-3.5 3.5 1 5L8 12.5 3.5 15l1-5L1 6.5 6 6z"/>
         </svg>
+        Favorites
       </button>
     </div>
 
-    <nav id="file-tree" class="file-tree">
-      <!-- Tree rendered by app.js -->
-    </nav>
+    <div id="tab-panel-files" class="tab-panel">
+      <div class="sidebar-stats" id="sidebar-stats">
+        <span id="file-count">0 files</span>
+        <span id="scan-status" class="status-dot status-scanning" title="Scanning..."></span>
+      </div>
+
+      <div class="tree-controls" id="tree-controls">
+        <button id="collapse-all" class="tree-control-btn" title="Collapse all folders">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M7.976 5.928L3.62 10.285 3 9.667 7.976 4.7l4.976 4.967-.62.618z"/>
+          </svg>
+        </button>
+        <button id="expand-all" class="tree-control-btn" title="Expand all folders">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M7.976 10.072l4.357-4.357.62.618L7.975 11.3 3 6.333l.619-.618z"/>
+          </svg>
+        </button>
+      </div>
+
+      <nav id="file-tree" class="file-tree">
+        <!-- Tree rendered by app.js -->
+      </nav>
+    </div>
+
+    <div id="tab-panel-favorites" class="tab-panel" hidden>
+      <div class="favorites-empty" id="favorites-empty">
+        <p>No favorites yet.</p>
+        <p class="favorites-hint">Click the ★ on any file or folder to add it here.</p>
+      </div>
+      <nav id="favorites-list" class="file-tree">
+        <!-- Favorites rendered by app.js -->
+      </nav>
+    </div>
   </aside>
 
   <!-- Main content -->
