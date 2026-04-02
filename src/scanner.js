@@ -82,7 +82,14 @@ async function* walkDir(dir, rootDir) {
 }
 
 export function buildTree(filesMap) {
-  const root = { name: '~', path: '', children: {}, files: [] };
+  // Determine rootDir from any entry
+  let rootDir = '';
+  for (const [absPath, entry] of filesMap) {
+    rootDir = absPath.slice(0, absPath.length - entry.relativePath.length - 1);
+    break;
+  }
+
+  const root = { name: '~', path: '', absolutePath: rootDir, children: {}, files: [] };
 
   for (const [absPath, entry] of filesMap) {
     const parts = entry.relativePath.split(path.sep);
@@ -92,9 +99,11 @@ export function buildTree(filesMap) {
     for (let i = 0; i < parts.length - 1; i++) {
       const part = parts[i];
       if (!node.children[part]) {
+        const relPath = parts.slice(0, i + 1).join('/');
         node.children[part] = {
           name: part,
-          path: parts.slice(0, i + 1).join('/'),
+          path: relPath,
+          absolutePath: rootDir + '/' + relPath,
           children: {},
           files: [],
         };
@@ -128,6 +137,7 @@ function sortTree(node) {
   return {
     name: node.name,
     path: node.path,
+    absolutePath: node.absolutePath,
     children: childArray,
     files: node.files,
   };

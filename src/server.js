@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { search as searchIndex, isIndexReady, getIndexedCount } from './indexer.js';
+import { getFavorites, toggleFavorite, isFavorite } from './favorites.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, '..', 'ui');
@@ -236,6 +237,54 @@ function handleVscodeCheck(res) {
   });
 }
 
+// --- Favorites ---
+
+function handleGetFavorites(state, res) {
+  const paths = getFavorites();
+  // Enrich with file info from state
+  const items = paths.map((p) => {
+    const fileEntry = state.files.get(p);
+    if (fileEntry) {
+      return { path: p, name: fileEntry.relativePath.split('/').pop(), relativePath: fileEntry.relativePath, gitRoot: fileEntry.gitRoot, type: 'file' };
+    }
+    // Could be a folder path — collect files under it
+    const folderFiles = [];
+    for (const [k, entry] of state.files) {
+      if (k.startsWith(p + '/')) {
+        folderFiles.push({
+          path: k,
+          name: entry.relativePath.split('/').pop(),
+          relativePath: entry.relativePath,
+          // sub-path relative to the favorite folder
+          subPath: k.slice(p.length + 1),
+          gitRoot: entry.gitRoot,
+        });
+      }
+    }
+    if (folderFiles.length > 0) {
+      folderFiles.sort((a, b) => a.subPath.localeCompare(b.subPath));
+      return { path: p, name: p.split('/').pop(), relativePath: p.replace(HOME + '/', ''), type: 'folder', files: folderFiles };
+    }
+    // Orphan favorite (file removed) — still return it
+    return { path: p, name: p.split('/').pop(), relativePath: p.replace(HOME + '/', ''), type: 'unknown' };
+  });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ favorites: items }));
+}
+
+async function handleToggleFavorite(req, res) {
+  const body = await readBody(req);
+  if (!body || !body.path) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid body' }));
+    return;
+  }
+
+  const nowFavorite = toggleFavorite(body.path);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true, favorite: nowFavorite }));
+}
+
 // --- WebSocket (minimal implementation) ---
 
 function handleUpgrade(req, socket, head, state) {
@@ -359,6 +408,10 @@ export function createServer(state, scanRoot) {
         await handleOpenVscode(req, res);
       } else if (pathname === '/api/vscode/check' && req.method === 'GET') {
         handleVscodeCheck(res);
+      } else if (pathname === '/api/favorites' && req.method === 'GET') {
+        handleGetFavorites(state, res);
+      } else if (pathname === '/api/favorites' && req.method === 'POST') {
+        await handleToggleFavorite(req, res);
       } else {
         // Static files
         serveStatic(req, res);

@@ -3,6 +3,7 @@ import { scan, buildTree } from './scanner.js';
 import { loadCache, saveCache } from './cache.js';
 import { startWatcher } from './watcher.js';
 import { buildIndex } from './indexer.js';
+import { loadFavorites } from './favorites.js';
 import os from 'node:os';
 
 const port = parseInt(process.argv[2] || process.env.MARKMEDOWN_PORT || '44444', 10);
@@ -22,6 +23,9 @@ async function main() {
     state.files = cached;
     state.tree = buildTree(state.files);
   }
+
+  // Load favorites
+  loadFavorites();
 
   // Start HTTP server
   const server = createServer(state, scanRoot);
