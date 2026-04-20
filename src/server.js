@@ -285,6 +285,44 @@ async function handleToggleFavorite(req, res) {
   res.end(JSON.stringify({ ok: true, favorite: nowFavorite }));
 }
 
+// --- Vendor Proxy (esm.sh) ---
+//
+// Milkdown is loaded from esm.sh at runtime. Browsers occasionally block those
+// cross-origin requests (CORS, corporate proxies, network hiccups) which
+// leaves the editor stuck in raw mode. Proxying through this server makes the
+// imports same-origin and immune to those failures.
+async function handleVendor(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const upstreamPath = url.pathname.replace(/^\/vendor/, '');
+  const upstreamUrl = 'https://esm.sh' + upstreamPath + url.search;
+
+  try {
+    const upstream = await fetch(upstreamUrl, {
+      headers: { 'User-Agent': 'markmedown-vendor-proxy' },
+    });
+    let body = await upstream.text();
+    const contentType = upstream.headers.get('content-type') || 'application/javascript; charset=utf-8';
+
+    // Rewrite nested imports so they come back through this proxy
+    // (esm.sh emits both absolute-paths like "/@milkdown/ctx@..." and
+    // fully-qualified "https://esm.sh/..." URLs inside module bodies).
+    if (contentType.includes('javascript') || contentType.includes('typescript')) {
+      body = body.replace(/(["'])https:\/\/esm\.sh\//g, '$1/vendor/');
+      body = body.replace(/(["'])\/(?!\/)(?!vendor\/)/g, '$1/vendor/');
+    }
+
+    res.writeHead(upstream.status, {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=86400',
+    });
+    res.end(body);
+  } catch (err) {
+    console.error('[markmedown] vendor proxy error:', err);
+    res.writeHead(502, { 'Content-Type': 'text/plain' });
+    res.end('Vendor proxy error: ' + err.message);
+  }
+}
+
 // --- WebSocket (minimal implementation) ---
 
 function handleUpgrade(req, socket, head, state) {
@@ -412,6 +450,8 @@ export function createServer(state, scanRoot) {
         handleGetFavorites(state, res);
       } else if (pathname === '/api/favorites' && req.method === 'POST') {
         await handleToggleFavorite(req, res);
+      } else if (pathname.startsWith('/vendor/') && req.method === 'GET') {
+        await handleVendor(req, res);
       } else {
         // Static files
         serveStatic(req, res);
