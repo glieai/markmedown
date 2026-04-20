@@ -45,6 +45,8 @@ const fileCountEl = $('#file-count');
 const scanStatus = $('#scan-status');
 const largeFileWarning = $('#large-file-warning');
 const largeFileSizeEl = $('#large-file-size');
+const parseErrorBanner = $('#parse-error-banner');
+const parseErrorMessage = $('#parse-error-message');
 const collapseAllBtn = $('#collapse-all');
 const expandAllBtn = $('#expand-all');
 const tabFiles = $('#tab-files');
@@ -442,10 +444,10 @@ async function loadMilkdownModules() {
   if (milkdownModules) return milkdownModules;
 
   const [core, commonmarkMod, gfmMod, listenerMod] = await Promise.all([
-    import(`https://esm.sh/@milkdown/core@${MILKDOWN_VERSION}`),
-    import(`https://esm.sh/@milkdown/preset-commonmark@${MILKDOWN_VERSION}`),
-    import(`https://esm.sh/@milkdown/preset-gfm@${MILKDOWN_VERSION}`),
-    import(`https://esm.sh/@milkdown/plugin-listener@${MILKDOWN_VERSION}`),
+    import(`/vendor/@milkdown/core@${MILKDOWN_VERSION}`),
+    import(`/vendor/@milkdown/preset-commonmark@${MILKDOWN_VERSION}`),
+    import(`/vendor/@milkdown/preset-gfm@${MILKDOWN_VERSION}`),
+    import(`/vendor/@milkdown/plugin-listener@${MILKDOWN_VERSION}`),
   ]);
 
   milkdownModules = { core, commonmarkMod, gfmMod, listenerMod };
@@ -542,8 +544,12 @@ function setEditorContent(markdown) {
   rawEditor.hidden = true;
   suppressNextChange = true;
 
+  parseErrorBanner.hidden = true;
+
   buildEditor(markdown).catch((err) => {
     console.error('[markmedown] failed to set editor content:', err);
+    parseErrorMessage.textContent = err?.message || String(err);
+    parseErrorBanner.hidden = false;
     setRawMode(true);
   });
 }
@@ -1193,23 +1199,28 @@ function renderFavoriteFile(item) {
 // --- Init ---
 
 async function init() {
-  const data = await refreshTree();
+  // Kick off slow I/O in parallel: tree scan, Milkdown CDN load, and (if present)
+  // the hash-target file fetch — the three were previously serial.
+  const milkdownPromise = initMilkdown();
+  const treePromise = refreshTree();
+
   checkVscode();
   loadFavorites();
   connectWebSocket();
-  await initMilkdown();
-
-  if (!data?.scanComplete) {
-    startStatusPoll();
-  }
-
   setupScrollToTop();
   setupAnchorLinks();
 
-  // Restore file from URL hash
   const hash = decodeURIComponent(location.hash.slice(1));
+  // Wait for Milkdown before rendering the hash file (otherwise it falls to raw).
+  await Promise.all([milkdownPromise, hash ? Promise.resolve() : treePromise]);
+
   if (hash) {
     openFile(hash, null);
+  }
+
+  const data = await treePromise;
+  if (!data?.scanComplete) {
+    startStatusPoll();
   }
 }
 
