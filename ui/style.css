@@ -85,6 +85,13 @@ body {
   flex-direction: column;
   overflow: hidden;
   user-select: none;
+  transition: width 0.15s ease, min-width 0.15s ease;
+}
+
+#sidebar.sidebar-collapsed {
+  width: 0;
+  min-width: 0;
+  border-right: none;
 }
 
 .sidebar-header {

@@ -16,7 +16,7 @@ export function startWatcher(scanRoot, state, onChange, onFileChanged) {
       );
       if (maxWatches < 8192) {
         console.log(`[markmedown] inotify limit low (${maxWatches}), using polling fallback`);
-        return startPollingWatcher(scanRoot, state, onChange);
+        return startPollingWatcher(scanRoot, state, onChange, onFileChanged);
       }
     } catch {
       // Can't read limit — try recursive watch anyway
@@ -33,14 +33,14 @@ export function startWatcher(scanRoot, state, onChange, onFileChanged) {
       console.error('[markmedown] watcher error:', err.message);
       console.log('[markmedown] falling back to polling');
       watcher.close();
-      startPollingWatcher(scanRoot, state, onChange);
+      startPollingWatcher(scanRoot, state, onChange, onFileChanged);
     });
 
     console.log('[markmedown] watching for changes (recursive)');
     return watcher;
   } catch {
     console.log('[markmedown] recursive watch not available, using polling');
-    return startPollingWatcher(scanRoot, state, onChange);
+    return startPollingWatcher(scanRoot, state, onChange, onFileChanged);
   }
 }
 
@@ -105,12 +105,13 @@ async function processFileChange(fullPath, scanRoot, state, onChange) {
   }
 }
 
-function startPollingWatcher(scanRoot, state, onChange) {
-  const POLL_INTERVAL = 30000; // 30 seconds
+function startPollingWatcher(scanRoot, state, onChange, onFileChanged) {
+  const POLL_INTERVAL = 1500; // 1.5s — fallback when inotify is exhausted (WSL2, containers, etc.)
 
   const interval = setInterval(async () => {
     // Quick check: compare file count and mtimes
-    let changed = false;
+    let treeChanged = false;
+    const changedFiles = [];
 
     for (const [absPath, entry] of state.files) {
       try {
@@ -118,17 +119,18 @@ function startPollingWatcher(scanRoot, state, onChange) {
         if (stat.mtimeMs !== entry.mtime) {
           entry.mtime = stat.mtimeMs;
           entry.size = stat.size;
-          changed = true;
+          changedFiles.push(absPath);
         }
       } catch {
         // File deleted
         state.files.delete(absPath);
-        changed = true;
+        treeChanged = true;
       }
     }
 
-    if (changed) {
-      onChange();
+    if (treeChanged || changedFiles.length) onChange();
+    if (onFileChanged) {
+      for (const p of changedFiles) onFileChanged(p);
     }
   }, POLL_INTERVAL);
 
