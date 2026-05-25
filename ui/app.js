@@ -366,7 +366,10 @@ async function openFile(path, fileInfo) {
 // Auto-refresh: reload current file when changed externally
 async function reloadCurrentFile() {
   if (!state.currentFile) return;
-  if (state.isDirty) return; // Don't overwrite unsaved changes
+  // Only block reload while the user is actively typing (last 1.5s).
+  // The auto-save timer is 500ms, so 1.5s comfortably covers the unsaved window
+  // without keeping external changes locked out forever.
+  if (lastLocalEditMs && Date.now() - lastLocalEditMs < 1500) return;
 
   try {
     const data = await api('GET', `/api/file?path=${encodeURIComponent(state.currentFile.path)}`);
@@ -418,9 +421,11 @@ async function saveCurrentFile() {
 }
 
 let saveTimer = null;
+let lastLocalEditMs = 0;
 function scheduleAutoSave() {
   if (!state.currentFile) return;
   state.isDirty = true;
+  lastLocalEditMs = Date.now();
   saveIndicator.hidden = false;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveCurrentFile, 500);
@@ -432,7 +437,10 @@ let milkdownModules = null;
 let milkdownEditor = null;
 let milkdownLoaded = false;
 let latestMarkdown = '';
-let suppressNextChange = false;
+// Time-window suppression: external content loads (file open, external reload, raw↔WYSIWYG toggle)
+// can trigger multiple Milkdown markdownUpdated events. Suppress them all during a brief window
+// instead of just the first one, otherwise isDirty gets set spuriously and reloadCurrentFile bails.
+let suppressUpdatesUntil = 0;
 
 // Store command references and ctx for toolbar
 let milkdownCommands = null;
@@ -477,10 +485,7 @@ async function buildEditor(markdown) {
       ctx.get(listenerCtx).markdownUpdated((_ctx, md, prevMd) => {
         latestMarkdown = md;
         if (prevMd !== null && md !== prevMd) {
-          if (suppressNextChange) {
-            suppressNextChange = false;
-            return;
-          }
+          if (Date.now() < suppressUpdatesUntil) return;
           scheduleAutoSave();
         }
       });
@@ -542,7 +547,7 @@ function setEditorContent(markdown) {
 
   milkdownEl.hidden = false;
   rawEditor.hidden = true;
-  suppressNextChange = true;
+  suppressUpdatesUntil = Date.now() + 800;
 
   parseErrorBanner.hidden = true;
 
@@ -659,7 +664,7 @@ function setRawMode(raw) {
     milkdownEl.hidden = false;
     rawEditor.hidden = true;
     if (milkdownLoaded && state.currentFile) {
-      suppressNextChange = true;
+      suppressUpdatesUntil = Date.now() + 800;
       buildEditor(rawEditor.value).catch(() => setRawMode(true));
     }
   }
@@ -703,6 +708,11 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
     saveCurrentFile();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+    e.preventDefault();
+    const sb = document.getElementById('sidebar');
+    if (sb) sb.classList.toggle('sidebar-collapsed');
   }
 });
 
