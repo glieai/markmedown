@@ -6,75 +6,203 @@ import { loadIgnorePatterns, shouldIgnoreDir } from './ignore.js';
 
 const ignoreSet = loadIgnorePatterns();
 
+// Never claim more than this share of the user's inotify quota. The graphical
+// session (systemd --user, wireplumber, portals, editors) draws from the same
+// per-UID pool, and draining it leaves the machine without audio until reboot.
+// A recursive watch over $HOME did exactly that on 2026-07-30 and 2026-08-04.
+const WATCH_BUDGET_SHARE = 0.25;
+const CONSERVATIVE_BUDGET = 8192;
+const POLL_INTERVAL = 1500; // 1.5s — fallback when inotify is unavailable (WSL2, containers, etc.)
+const DEBOUNCE_MS = 300;
+
 export function startWatcher(scanRoot, state, onChange, onFileChanged) {
-  // Check if recursive watching is viable
-  if (process.platform === 'linux') {
-    try {
-      const maxWatches = parseInt(
-        fs.readFileSync('/proc/sys/fs/inotify/max_user_watches', 'utf8').trim(),
-        10
-      );
-      if (maxWatches < 8192) {
-        console.log(`[markmedown] inotify limit low (${maxWatches}), using polling fallback`);
-        return startPollingWatcher(scanRoot, state, onChange, onFileChanged);
-      }
-    } catch {
-      // Can't read limit — try recursive watch anyway
+  const ctx = {
+    scanRoot,
+    state,
+    onChange,
+    onFileChanged,
+    watched: new Map(),
+    budget: readWatchBudget(),
+  };
+
+  const dirs = collectWatchDirs(scanRoot, state);
+
+  if (dirs.size > ctx.budget) {
+    console.log(
+      `[markmedown] ${dirs.size} directories exceed the ${ctx.budget}-watch budget, using polling`
+    );
+    return startPollingWatcher(scanRoot, state, onChange, onFileChanged);
+  }
+
+  for (const dir of dirs) {
+    if (watchDir(ctx, dir) === 'exhausted') {
+      console.log('[markmedown] inotify quota exhausted, falling back to polling');
+      closeAll(ctx);
+      return startPollingWatcher(scanRoot, state, onChange, onFileChanged);
     }
   }
 
-  try {
-    const watcher = fs.watch(scanRoot, { recursive: true }, (eventType, filename) => {
-      if (!filename) return;
-      handleWatchEvent(eventType, filename, scanRoot, state, onChange, onFileChanged);
-    });
+  console.log(`[markmedown] watching ${ctx.watched.size} directories for changes`);
+  return { close: () => closeAll(ctx) };
+}
 
-    watcher.on('error', (err) => {
-      console.error('[markmedown] watcher error:', err.message);
-      console.log('[markmedown] falling back to polling');
-      watcher.close();
-      startPollingWatcher(scanRoot, state, onChange, onFileChanged);
-    });
+// Directories holding a known .md file, plus every ancestor up to the scan root.
+// Ancestors are cheap and let us notice new subdirectories as they appear.
+function collectWatchDirs(scanRoot, state) {
+  const dirs = new Set([scanRoot]);
 
-    console.log('[markmedown] watching for changes (recursive)');
-    return watcher;
-  } catch {
-    console.log('[markmedown] recursive watch not available, using polling');
-    return startPollingWatcher(scanRoot, state, onChange, onFileChanged);
+  for (const absPath of state.files.keys()) {
+    let dir = path.dirname(absPath);
+    while (dir.startsWith(scanRoot) && !dirs.has(dir)) {
+      dirs.add(dir);
+      if (dir === scanRoot) break;
+      dir = path.dirname(dir);
+    }
   }
+
+  return dirs;
+}
+
+function readWatchBudget() {
+  if (process.platform !== 'linux') return Infinity; // no per-user watch limit to respect
+
+  try {
+    const limit = parseInt(
+      fs.readFileSync('/proc/sys/fs/inotify/max_user_watches', 'utf8').trim(),
+      10
+    );
+    if (!Number.isFinite(limit)) return CONSERVATIVE_BUDGET;
+    return Math.floor(limit * WATCH_BUDGET_SHARE);
+  } catch {
+    return CONSERVATIVE_BUDGET;
+  }
+}
+
+// Returns 'ok' (watching), 'skip' (nothing to watch here) or 'exhausted' (quota hit).
+function watchDir(ctx, dir) {
+  if (ctx.watched.has(dir)) return 'ok'; // idempotent — never two watches on one dir
+  if (ctx.watched.size >= ctx.budget) return 'exhausted';
+
+  let watcher;
+  try {
+    watcher = fs.watch(dir, (eventType, filename) => onDirEvent(ctx, dir, filename));
+  } catch (err) {
+    if (err.code === 'ENOSPC' || err.code === 'EMFILE') return 'exhausted';
+    return 'skip'; // gone (ENOENT) or unreadable (EACCES) — not our problem to solve
+  }
+
+  watcher.on('error', () => {
+    watcher.close();
+    ctx.watched.delete(dir);
+  });
+
+  ctx.watched.set(dir, watcher);
+  return 'ok';
+}
+
+function closeAll(ctx) {
+  for (const watcher of ctx.watched.values()) {
+    try { watcher.close(); } catch {}
+  }
+  ctx.watched.clear();
+}
+
+function onDirEvent(ctx, dir, filename) {
+  if (!filename) return;
+
+  const fullPath = path.join(dir, filename);
+
+  if (filename.endsWith('.md')) {
+    handleFileEvent(ctx, fullPath);
+    return;
+  }
+
+  // Anything else may be a new directory worth following (git clone, moved folder).
+  adoptDirectory(ctx, fullPath, filename);
+}
+
+async function adoptDirectory(ctx, fullPath, name) {
+  if (shouldIgnoreDir(name, ignoreSet)) return;
+
+  try {
+    const stat = await fsp.stat(fullPath);
+    if (!stat.isDirectory()) return;
+  } catch {
+    return; // vanished or unreadable
+  }
+
+  const added = await walkAndWatch(ctx, fullPath);
+  if (added) ctx.onChange();
+}
+
+// Watch a freshly appeared subtree and index the .md files it brought with it.
+async function walkAndWatch(ctx, dir) {
+  if (watchDir(ctx, dir) !== 'ok') return false;
+
+  let handle;
+  try {
+    handle = await fsp.opendir(dir);
+  } catch {
+    return false;
+  }
+
+  const subdirs = [];
+  const files = [];
+
+  for await (const entry of handle) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!shouldIgnoreDir(entry.name, ignoreSet)) subdirs.push(fullPath);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      files.push(fullPath);
+    }
+  }
+
+  let changed = false;
+
+  for (const file of files) {
+    if (await processFileChange(file, ctx.scanRoot, ctx.state)) {
+      changed = true;
+      if (ctx.onFileChanged) ctx.onFileChanged(file);
+    }
+  }
+
+  for (const subdir of subdirs) {
+    if (await walkAndWatch(ctx, subdir)) changed = true;
+  }
+
+  return changed;
 }
 
 // Debounce map to avoid rapid-fire events for the same file
 const debounceTimers = new Map();
 
-function handleWatchEvent(eventType, filename, scanRoot, state, onChange, onFileChanged) {
-  // Only care about .md files
-  if (!filename.endsWith('.md')) return;
-
-  const fullPath = path.join(scanRoot, filename);
+function handleFileEvent(ctx, fullPath) {
+  const relativePath = path.relative(ctx.scanRoot, fullPath);
 
   // Check if any parent directory should be ignored
-  const parts = filename.split(path.sep);
-  for (const part of parts) {
+  for (const part of relativePath.split(path.sep)) {
     if (shouldIgnoreDir(part, ignoreSet)) return;
   }
 
   // Skip self-triggered events
   if (recentlyWritten.has(fullPath)) return;
 
-  // Debounce: wait 300ms before processing
   if (debounceTimers.has(fullPath)) {
     clearTimeout(debounceTimers.get(fullPath));
   }
 
   debounceTimers.set(fullPath, setTimeout(async () => {
     debounceTimers.delete(fullPath);
-    const changed = await processFileChange(fullPath, scanRoot, state, onChange);
-    if (changed && onFileChanged) onFileChanged(fullPath);
-  }, 300));
+    const changed = await processFileChange(fullPath, ctx.scanRoot, ctx.state);
+    if (changed) {
+      ctx.onChange();
+      if (ctx.onFileChanged) ctx.onFileChanged(fullPath);
+    }
+  }, DEBOUNCE_MS));
 }
 
-async function processFileChange(fullPath, scanRoot, state, onChange) {
+async function processFileChange(fullPath, scanRoot, state) {
   try {
     const stat = await fsp.stat(fullPath);
 
@@ -91,13 +219,11 @@ async function processFileChange(fullPath, scanRoot, state, onChange) {
       gitRoot: existing?.gitRoot ?? null,
     });
 
-    onChange();
     return true;
   } catch (err) {
     if (err.code === 'ENOENT') {
       if (state.files.has(fullPath)) {
         state.files.delete(fullPath);
-        onChange();
         return true;
       }
     }
@@ -106,8 +232,6 @@ async function processFileChange(fullPath, scanRoot, state, onChange) {
 }
 
 function startPollingWatcher(scanRoot, state, onChange, onFileChanged) {
-  const POLL_INTERVAL = 1500; // 1.5s — fallback when inotify is exhausted (WSL2, containers, etc.)
-
   const interval = setInterval(async () => {
     // Quick check: compare file count and mtimes
     let treeChanged = false;

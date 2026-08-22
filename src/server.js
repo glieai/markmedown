@@ -6,8 +6,9 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
-import { search as searchIndex, isIndexReady, getIndexedCount } from './indexer.js';
+import { search as searchIndex, isIndexReady, getIndexedCount, buildIndex } from './indexer.js';
 import { getFavorites, toggleFavorite, isFavorite } from './favorites.js';
+import { scan, buildTree } from './scanner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, '..', 'ui');
@@ -63,7 +64,8 @@ function serveStatic(req, res) {
 
   try {
     const content = fs.readFileSync(filePath);
-    res.writeHead(200, { 'Content-Type': contentType });
+    // Local-only tool, tiny assets: never cache the UI so code changes always load.
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
     res.end(content);
   } catch {
     res.writeHead(404);
@@ -82,6 +84,28 @@ function handleGetTree(state, res) {
     indexReady: isIndexReady(),
     indexedFiles: getIndexedCount(),
   }));
+}
+
+// Full on-demand rescan — the polling watcher only tracks already-known files
+// (it can't discover newly-created ones), so the refresh button forces a fresh walk.
+let rescanning = false;
+async function handleRescan(state, scanRoot, res) {
+  if (!rescanning) {
+    rescanning = true;
+    try {
+      const files = new Map();
+      for await (const entry of scan(scanRoot)) {
+        files.set(entry.absolutePath, entry);
+      }
+      state.files = files;
+      state.tree = buildTree(state.files);
+      state.scanComplete = true;
+      buildIndex(state.files); // refresh search index in background
+    } finally {
+      rescanning = false;
+    }
+  }
+  handleGetTree(state, res);
 }
 
 function handleSearch(req, state, res) {
@@ -434,6 +458,8 @@ export function createServer(state, scanRoot) {
       // API routes
       if (pathname === '/api/tree' && req.method === 'GET') {
         handleGetTree(state, res);
+      } else if (pathname === '/api/rescan' && req.method === 'POST') {
+        await handleRescan(state, scanRoot, res);
       } else if (pathname === '/api/search' && req.method === 'GET') {
         handleSearch(req, state, res);
       } else if (pathname === '/api/file' && req.method === 'GET') {

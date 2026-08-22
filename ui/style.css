@@ -99,7 +99,9 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 16px 16px 8px;
+  gap: 4px;
 }
+.sidebar-header .logo { flex: 1; }
 
 .logo {
   font-size: 15px;
@@ -131,6 +133,8 @@ body {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+.icon-btn svg { transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1); }
+.icon-btn.spinning svg { transform: rotate(-360deg); }
 
 /* Search */
 .search-container {
