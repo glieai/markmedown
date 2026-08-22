@@ -167,6 +167,14 @@ function updateActiveFile(path) {
     btn.classList.toggle('active', btn.dataset.path === path);
   });
   if (path) expandToFile(path);
+  setDocumentTitle(path);
+}
+
+// File name first: Chrome truncates tab titles from the right, so with several tabs
+// open the app name would be all that survives if it came first.
+function setDocumentTitle(path) {
+  const name = path ? path.split('/').pop() : '';
+  document.title = name ? `${name} - markmedown` : 'markmedown';
 }
 
 // Expand only the folders on the path to the given file, leaving the rest as-is.
