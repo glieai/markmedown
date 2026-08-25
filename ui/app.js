@@ -38,6 +38,7 @@ const saveIndicator = $('#save-indicator');
 const rawToggle = $('#raw-toggle');
 const vscodeBtn = $('#vscode-btn');
 const newFileBtn = $('#new-file-btn');
+const refreshBtn = $('#refresh-btn');
 const newFileDialog = $('#new-file-dialog');
 const newFilePath = $('#new-file-path');
 const newFileCancel = $('#new-file-cancel');
@@ -70,6 +71,10 @@ async function api(method, path, body) {
 
 // --- File Tree ---
 
+// Folders the user (or the open-file path) has expanded — keyed by absolute path.
+// Survives re-renders so external edits / scan updates don't reset the tree.
+const expandedFolders = new Set();
+
 function renderTree(tree) {
   if (!tree) return;
   fileTree.innerHTML = '';
@@ -78,9 +83,15 @@ function renderTree(tree) {
 
 function renderNode(node, parent, depth) {
   for (const child of node.children) {
+    const folderPath = child.absolutePath || child.path;
     const details = document.createElement('details');
     details.className = 'tree-folder';
-    if (depth === 0) details.open = true;
+    details.dataset.path = folderPath;
+    details.open = expandedFolders.has(folderPath);
+    details.addEventListener('toggle', () => {
+      if (details.open) expandedFolders.add(folderPath);
+      else expandedFolders.delete(folderPath);
+    });
 
     const summary = document.createElement('summary');
     summary.innerHTML = `<span class="tree-folder-icon">📁</span><span class="tree-folder-name">${escapeHtml(child.name)}</span>`;
@@ -154,6 +165,25 @@ function createFileButton(file) {
 function updateActiveFile(path) {
   fileTree.querySelectorAll('.tree-file').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.path === path);
+  });
+  if (path) expandToFile(path);
+  setDocumentTitle(path);
+}
+
+// File name first: Chrome truncates tab titles from the right, so with several tabs
+// open the app name would be all that survives if it came first.
+function setDocumentTitle(path) {
+  const name = path ? path.split('/').pop() : '';
+  document.title = name ? `${name} - markmedown` : 'markmedown';
+}
+
+// Expand only the folders on the path to the given file, leaving the rest as-is.
+function expandToFile(filePath) {
+  fileTree.querySelectorAll('.tree-folder').forEach((d) => {
+    const p = d.dataset.path;
+    if (p && (filePath === p || filePath.startsWith(p + '/')) && !d.open) {
+      d.open = true;
+    }
   });
 }
 
@@ -847,6 +877,23 @@ async function refreshTree() {
     return null;
   }
 }
+
+// Manual refresh button (sidebar header) — forces a full server rescan so
+// newly-created files (which the polling watcher can't discover) show up.
+refreshBtn?.addEventListener('click', async () => {
+  refreshBtn.classList.add('spinning');
+  try {
+    const data = await api('POST', '/api/rescan');
+    if (data?.tree) {
+      renderTree(data.tree);
+      updateStatus(data.totalFiles, data.scanComplete);
+      if (state.currentFile) updateActiveFile(state.currentFile.path);
+    }
+  } catch (err) {
+    console.error('[markmedown] rescan failed:', err);
+  }
+  setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
+});
 
 // Poll until scan complete (WebSocket fallback for large payloads)
 function startStatusPoll() {
