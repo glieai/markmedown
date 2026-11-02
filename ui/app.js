@@ -476,7 +476,10 @@ let suppressUpdatesUntil = 0;
 let milkdownCommands = null;
 let commandsCtxRef = null;
 
-const MILKDOWN_VERSION = '7.20.0';
+// 7.22.0 or later. Earlier presets declare the list `spread` attr as boolean but
+// set it as a string, so prosemirror-model (unpinned on esm.sh) throws a RangeError
+// on every list node and no list renders.
+const MILKDOWN_VERSION = '7.22.3';
 
 async function loadMilkdownModules() {
   if (milkdownModules) return milkdownModules;
